@@ -6,13 +6,14 @@ set -e
 set -u
 
 OUTDIR=/tmp/aeld
+CURRDIR=~/dev/embedded_linux_course
 KERNEL_REPO=git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git
 KERNEL_VERSION=v5.1.10
 BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
-TOOL_CHAIN=/home/momen/dev/tools/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu
+TOOL_CHAIN=${CURRDIR}/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu
 
 if [ $# -lt 1 ]
 then
@@ -34,14 +35,13 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     cd linux-stable
     echo "Checking out version ${KERNEL_VERSION}"
     git checkout ${KERNEL_VERSION}
+    # TODO: Add your kernel build steps here
+    make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mrproper # It goes silence in case of already cleaned direc.
+    make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig  # default configuration for arm64 
+    make j=10 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE all # This is the steps where the Image gets generated, j=10 uses multithreading to build!
+    make j=10 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules # Generate the modules
+    make j=10 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs # Generate device tree
 fi
-
-# TODO: Add your kernel build steps here
-make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE mrproper # It goes silence in case of already cleaned direc.
-make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE defconfig  # default configuration for arm64 
-make j=6 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE all # This is the steps where the Image gets generated, j=10 uses multithreading to build!
-make j=6 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE modules # Generate the modules
-make j=6 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE dtbs # Generate device tree
 
 echo "Adding the Image in outdir"
 
@@ -75,8 +75,8 @@ fi
 # TODO: Make and install busybox
 make distclean  # It goes silence in case of already cleaned direc.
 make defconfig  # default configuration for arm64 
-make j=6 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE   # builds the busybox executable!
-make j=6 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CONFIG_PREFIX=${OUTDIR}/rootfs install # Adds all the program bin to the rootfs/bin as hard links
+make j=10 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE   # builds the busybox executable!
+make j=10 ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE CONFIG_PREFIX=${OUTDIR}/rootfs install # Adds all the program bin to the rootfs/bin as hard links
 
 echo "Library dependencies"
 ${CROSS_COMPILE}readelf -a busybox | grep "program interpreter"
