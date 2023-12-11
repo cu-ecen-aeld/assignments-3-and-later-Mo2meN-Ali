@@ -12,7 +12,7 @@ BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
-TOOL_CHAIN=$HOME/dev/tools/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu
+TOOL_CHAIN=/home/momen/dev/tools/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/aarch64-none-linux-gnu
 
 if [ $# -lt 1 ]
 then
@@ -104,7 +104,7 @@ if [ ! -e ${OUTDIR}/rootfs/dev/null ]; then
 fi
 
 # TODO: Clean and build the writer utility
-cd $HOME/dev/embedded_linux_course/finder-app  
+cd /home/momen/dev/embedded_linux_course/finder-app  
 if [ ! -e writer ]; then # if the writer app does not exist!
     make CROSS_COMPILE=${CROSS_COMPILE} all
 else
