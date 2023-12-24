@@ -5,10 +5,20 @@
 set -e
 set -u
 
-NUMFILES=10
+# create $WRITEDIR if not assignment1 or assignment4
+assignment=$(cat /etc/finder-app/conf/assignment.txt)
+username=$(cat /etc/finder-app/conf/username.txt)
 WRITESTR=AELD_IS_FUN
-WRITEDIR=/tmp/aeld-data
-username=$(cat conf/username.txt)
+
+if [ $assignment != 'assignment4' ]; then
+	NUMFILES=10
+	WRITEDIR=/tmp/aeld-data
+else
+	NUMFILES=1
+	WRITEDIR=/tmp
+fi
+
+cd `dirname $0`
 
 if [ $# -lt 3 ]
 then
@@ -27,14 +37,13 @@ fi
 
 MATCHSTR="The number of files are ${NUMFILES} and the number of matching lines are ${NUMFILES}"
 
-echo "Writing ${NUMFILES} files containing string ${WRITESTR} to ${WRITEDIR}"
+if [ $assignment != 'assignment4' ]; then
+	rm -rf "${WRITEDIR}"
+else
+	rm -rf "${WRITEDIR}/assignment4-results.txt"
+fi
 
-rm -rf "${WRITEDIR}"
-
-# create $WRITEDIR if not assignment1
-assignment=`cat conf/assignment.txt` 
-
-if [ $assignment != 'assignment1' ]
+if [ $assignment != 'assignment1' ] && [ $assignment != 'assignment4' ]
 then
 	mkdir -p "$WRITEDIR"
 
@@ -48,19 +57,18 @@ then
 		exit 1
 	fi
 fi
-#echo "Removing the old writer utility and compiling as a native application"
-#make clean
-#make
 
-for i in $( seq 1 $NUMFILES)
-do
-	./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
-done
+if [ $assignment != 'assignment4' ]; then
+	echo "Writing ${NUMFILES} files containing string ${WRITESTR} to ${WRITEDIR}"
+	for i in $( seq 1 $NUMFILES)
+	do
+		./writer "$WRITEDIR/${username}$i.txt" "$WRITESTR"
+	done
+else
+	./writer "$WRITEDIR/assignment4-results.txt" "$WRITESTR"
+fi
 
 OUTPUTSTRING=$(./finder.sh "$WRITEDIR" "$WRITESTR")
-
-# remove temporary directories
-rm -rf /tmp/aeld-data
 
 set +e
 echo ${OUTPUTSTRING} | grep "${MATCHSTR}"
