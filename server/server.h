@@ -17,7 +17,7 @@
 #ifdef __cplusplus
 extern "C" {
 
-constexpr int THREAD_MAX = 10;
+constexpr int THREAD_MAX = 20;
 
 /*
  * struct addrinfo {
@@ -35,11 +35,12 @@ constexpr int THREAD_MAX = 10;
 class server {
 public:
     struct thread_args {
-        bool isComplete;       // Thread completion status flag
+        bool isComplete;      // Thread completion status flag
         int socketfd;         // The socket representing this user
-        unsigned char msgLen; // Size of the buffer
+        unsigned int  msgLen; // Size of the buffer
         char *msg;            // The buffer to hold messages
         pthread_t threadId;
+        FILE *pFile;
     };
 
     server():
@@ -90,7 +91,6 @@ public:
     {
         int status;
 
-        printf("IP = %s\n\n", service);
         status = getaddrinfo(NULL, service, &hints, &resInfo);
         if (0 != status) {
             fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
@@ -151,7 +151,8 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int initServerThread(int commSocket, void *server_thread(void *threadArgs), int msgLen)
+    int initServerThread(int commSocket, void *server_thread(void *threadArgs), 
+                         int msgLen, FILE *userFile)
     {
         int status = -1;
 
@@ -171,6 +172,7 @@ public:
         } else {    // If malloc failed.
             return status;
         }
+        pThreadArgs[numOfThreads]->pFile = userFile;
         status = pthread_create(&pThreadArgs[numOfThreads]->threadId, NULL, 
                     server_thread, static_cast<void *>(pThreadArgs[numOfThreads]));
         if (0 != status) {

@@ -5,9 +5,9 @@
 #include <unistd.h>
 #include "server.h"
 
-constexpr unsigned short FILE_BUFFER_LEN = 100;
-constexpr unsigned char MSG_LEN     = 100;
-constexpr unsigned char IP_ADDR_LEN = 20;
+constexpr unsigned int SERVER_MSG_LEN  = 100000;
+constexpr unsigned char BUFFER_LEN     = 100;
+constexpr unsigned char IP_ADDR_LEN    = 20;
 constexpr char LF   = 0x0A;
 constexpr int ERROR = -1;
 
@@ -30,20 +30,26 @@ static void signal_handler(int signalNo);
 
 int main(int argc, char *argv[])
 {
-    int prog_status = EXIT_SUCCESS; 
+    int prog_status = EXIT_SUCCESS;
     pthread_t portList[THREAD_MAX];
-    char syslogBuffer[MSG_LEN]     = {'\0'};
+    char syslogBuffer[BUFFER_LEN] = {'\0'};
     unsigned char i   = 0;
     int listenPort    = -1;
-    FILE *pFile       = NULL;
     struct sigaction signalsAct;
-    // server defServer; 
+    // server defServer;
     server ipServer("9000");
     struct sockaddr ipSockAddr;
     socklen_t len = sizeof(ipSockAddr);
+    FILE *pFile = NULL;
+
+    pFile = fopen("/var/tmp/aesdsocketdata.txt", "a+");
+    if (NULL == pFile)  {
+        perror("fopen():");
+        exit(EXIT_FAILURE);
+    }
 
     printf("ipServer socketfd: %d\n", ipServer.create(20));
-    
+
     memset(&signalsAct, 0, sizeof(signalsAct));
     signalsAct.sa_handler = signal_handler;
 
@@ -57,12 +63,8 @@ int main(int argc, char *argv[])
         perror("sigaction(SIGTERM):");
         exit(EXIT_FAILURE);
     }
-    // pFile = fopen("/var/tmp/aesdsocketdata.txt", "a");
-    // if (NULL == pFile)  {
-    //     puts("fopen(): failed");
-    //     exit(EXIT_FAILURE);
-    // }
-    while (1) { 
+
+    while (1) {
         if (true  == sigTermFlag) {
             syslog(LOG_DEBUG, "Caught signal, exiting");
             sigIntFlag = false;
@@ -72,13 +74,13 @@ int main(int argc, char *argv[])
             syslog(LOG_DEBUG, "Caught signal, exiting");
             sigTermFlag = false;
             sigThreadTerminateFlag = true;
-            break;     
+            break;
         }
         if (i < 100) {
             listenPort  = ipServer.newClientSocket(&ipSockAddr, &len);
-            if ((listenPort > 0) && 
+            if ((listenPort > 0) &&
                 (i < THREAD_MAX)) {
-                ipServer.initServerThread(listenPort, server_thread, MSG_LEN);
+                ipServer.initServerThread(listenPort, server_thread, SERVER_MSG_LEN, pFile);
                 portList[i] = ipServer.getThreadId(i);
                 printf("Created new thread %lu\n\n", ipServer.getThreadId(i));
                 ++i;
@@ -86,12 +88,9 @@ int main(int argc, char *argv[])
                 ipServer.getIpAddr(syslogBuffer + strlen(syslogBuffer));
                 syslog(LOG_DEBUG, syslogBuffer);
             }
-        } 
+        }
     }
     for (int j = 0; j < i; ++j) {
-        // printf("Searching for thread %lu with j = %d\n", portList[j], j);
-        // printf("Thread join: %lu, completion status: %d\n\n", 
-        //     portList[j], ipServer.threadCompletionStatus(portList[j]));
         prog_status = pthread_join(portList[j], NULL);
         if (0 != prog_status) {
             errno = prog_status;
@@ -99,59 +98,77 @@ int main(int argc, char *argv[])
         }
     }
     sigThreadTerminateFlag = false;
-    // fclose(pFile);
+    fclose(pFile);
+    system("rm /var/tmp/aesdsocketdata.txt");
+
     return (prog_status);
 }
 
 void *server_thread(void *args)
 {
-    int numOfReceivedBytes = 0;
-    char fileBuffer[FILE_BUFFER_LEN] = {'\0'};
-    int i, j;
-    struct server::thread_args *pThreadArgs = 
+    int numOfBytes = 0;
+    char *fileBuffer = 
+        static_cast<char *>(malloc(sizeof(char) * SERVER_MSG_LEN));
+    unsigned int i, j, k = 0;
+    struct server::thread_args *pThreadArgs =
         static_cast<struct server::thread_args *>(args);
 
-    FILE *pFile = NULL;
-    pFile = pFile; // To avoid the warning
-    pFile = fopen("/var/tmp/aesdsocketdata.txt", "w");
-    if (NULL == pFile)  {
-        puts("fopen(): failed");
-        exit(EXIT_FAILURE);
-    }
     memset(pThreadArgs->msg, 0, pThreadArgs->msgLen);
-    do { 
+    memset(fileBuffer, 0, SERVER_MSG_LEN);
+    do {
         if (true == sigThreadTerminateFlag) {
             break;
         }
-        numOfReceivedBytes = 
+        numOfBytes =
             recv(pThreadArgs->socketfd, pThreadArgs->msg, pThreadArgs->msgLen, 0);
-        if (0 != numOfReceivedBytes) {
-            i = j = 0;
-            // printf("pThreadArgs->msgLen = %d, numOfReceivedBytes = %d\n\n", 
-            //     pThreadArgs->msgLen, numOfReceivedBytes);
-            while ((i < pThreadArgs->msgLen) && 
+        if (-1 == numOfBytes) {
+            perror("recv():");
+        }
+        if (0 != numOfBytes) {
+            i = j = k = 0;
+            // printf("pThreadArgs->msgLen = %d, numOfBytes received = %d\n\n",
+            //     pThreadArgs->msgLen, numOfBytes);
+            while ((i < pThreadArgs->msgLen) &&
                    ('\0' != pThreadArgs->msg[i])) {
-                while ((LF  != pThreadArgs->msg[i]) && 
+                while ((LF  != pThreadArgs->msg[i]) &&
                        ('\0' != pThreadArgs->msg[i])) {
-                    fileBuffer[j] = pThreadArgs->msg[i];
-                    ++i;
-                    ++j;
+                    fileBuffer[j++] = pThreadArgs->msg[i++];
                 }
-                fileBuffer[j] = ' ';
+                fileBuffer[j++] = LF;
                 j = 0;
                 ++i;
-                // printf("fileBuffer = %s, pThreadsArgs->msg = %s\n\n", 
+                fseek(pThreadArgs->pFile, 0, SEEK_END);
+                // printf("fileBuffer = %s, pThreadsArgs->msg = %s\n\n",
                 //     fileBuffer, pThreadArgs->msg);
-                fprintf(pFile, "%s", fileBuffer);
-                fflush(pFile);
-                memset(fileBuffer, 0, FILE_BUFFER_LEN);
+                fprintf(pThreadArgs->pFile, "%s", fileBuffer);
+                fflush(pThreadArgs->pFile);
+                memset(fileBuffer, '\0', SERVER_MSG_LEN);
+                rewind(pThreadArgs->pFile);
+                while (j < SERVER_MSG_LEN) {
+                    fileBuffer[j] = fgetc(pThreadArgs->pFile);
+                    if (EOF == fileBuffer[j]) {
+                        break;
+                    }
+                    ++j;
+                }
+                fflush(pThreadArgs->pFile);
+                fileBuffer[j] = '\0';
+                numOfBytes = send(pThreadArgs->socketfd, fileBuffer,
+                                strlen(fileBuffer), 0);
+                if (-1 == numOfBytes) {
+                    perror("send():");
+                }
+                // printf("numOfBytes sent: %d, strlen(fileBuffer) = %lu\n",
+                //     numOfBytes, strlen(fileBuffer));
+                j = 0;
+                memset(fileBuffer, '\0', SERVER_MSG_LEN);
             }
         }
         memset(pThreadArgs->msg, 0, pThreadArgs->msgLen);
     } while (1);
+    free(fileBuffer);
     pThreadArgs->isComplete = true;
-    fclose(pFile);
-    system("rm /var/tmp/aesdsocketdata.txt");
+
     return EXIT_SUCCESS;
 }
 
