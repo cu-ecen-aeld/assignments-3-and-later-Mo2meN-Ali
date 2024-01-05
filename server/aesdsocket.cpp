@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
     socklen_t len = sizeof(ipSockAddr);
     FILE *pFile = NULL;
 
-    pFile = fopen("/var/tmp/aesdsocketdata.txt", "a+");
+    pFile = fopen("/var/tmp/aesdsocketdata.txt", "w+");
     if (NULL == pFile)  {
         perror("fopen():");
         exit(EXIT_FAILURE);
@@ -50,6 +50,15 @@ int main(int argc, char *argv[])
 
     printf("ipServer socketfd: %d\n", ipServer.create(20));
 
+    if (NULL != argv[1]) {
+        if (0 == strcmp(argv[1], "-d")) {
+            prog_status = daemon(0, 0);
+            if (0 != prog_status) {
+                perror("daemon():");
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
     memset(&signalsAct, 0, sizeof(signalsAct));
     signalsAct.sa_handler = signal_handler;
 

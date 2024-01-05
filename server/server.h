@@ -72,17 +72,17 @@ public:
 
     ~server() 
     {
-        if (true == isAllocated) {  // Clean getaddrinfo() struct
+        if (-1 != socketfd) { // Close the server socket
+            // shutdown(socketfd, SHUT_RDWR);
+            close(socketfd);
+        }
+        if (true == isAllocated) { // Clean getaddrinfo() struct
             freeaddrinfo(resInfo);
         }
-        for (int i = 0; i < numOfThreads; ++i) {   // Clean memory after each thread
+        for (int i = 0; i < numOfThreads; ++i) { // Clean memory after each thread
             printf("~Free thread %d\n\n", i);
             free(pThreadArgs[i]->msg);
             free(pThreadArgs[i]);
-        }
-        if (-1 != socketfd) {   // Close the server socket
-            // shutdown(socketfd, SHUT_RDWR);
-            close(socketfd);
         }
     }
 
@@ -121,7 +121,11 @@ public:
         // fcntl(socketfd, F_SETFL, O_NONBLOCK); 
         commSocket = accept(socketfd, listenSockAddr, listenSockLen);
         /* Debugging! */
-        printf("Accept(), commSocket = %d\n", commSocket); 
+        printf("Accept(), commSocket = %d\n", commSocket);
+        if (-1 == commSocket) {
+            perror("accept():");
+            return commSocket;
+        }
 
         return commSocket;
     }
