@@ -8,7 +8,9 @@
 constexpr unsigned int SERVER_MSG_LEN  = 100000;
 constexpr unsigned char BUFFER_LEN     = 100;
 constexpr unsigned char IP_ADDR_LEN    = 20;
-constexpr char LF   = 0x0A;
+constexpr unsigned char LF   = 0x0A;
+constexpr unsigned char CR   = 0x0D;
+constexpr unsigned char CRLF = 0xDA;
 constexpr int ERROR = -1;
 
 int sigTermFlag = false;
@@ -139,11 +141,23 @@ void *server_thread(void *args)
             //     pThreadArgs->msgLen, numOfBytes);
             while ((i < pThreadArgs->msgLen) &&
                    ('\0' != pThreadArgs->msg[i])) {
-                while ((LF  != pThreadArgs->msg[i]) &&
+                while ((LF != pThreadArgs->msg[i])   &&
+                       (CR != pThreadArgs->msg[i])   &&
+                       (CRLF != pThreadArgs->msg[i]) &&
                        ('\0' != pThreadArgs->msg[i])) {
                     fileBuffer[j++] = pThreadArgs->msg[i++];
                 }
-                fileBuffer[j++] = LF;
+                if (LF  == pThreadArgs->msg[i]) {
+                    fileBuffer[j++] = LF;
+                } else if ((CR == pThreadArgs->msg[i++]) && 
+                           (LF == pThreadArgs->msg[i])) {
+                    fileBuffer[j++] = CR;
+                    fileBuffer[j++] = LF;
+                } else if (CR  == pThreadArgs->msg[i]) {
+                    fileBuffer[j++] = CR;
+                } else if (CRLF == pThreadArgs->msg[i]) {
+                    fileBuffer[j++] = CRLF;
+                }
                 j = 0;
                 ++i;
                 fseek(pThreadArgs->pFile, 0, SEEK_END);
