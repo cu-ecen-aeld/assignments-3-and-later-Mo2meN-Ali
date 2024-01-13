@@ -10,7 +10,7 @@ endif
 
 .phony: all
 all:
-	$(CC) $(CCFLAGS) aesdsocket.cpp -o aesdsocket
+	$(CC) $(CCFLAGS) aesdsocket.cpp -o aesdsocket -lstdc++
 
 .phony: clean
 clean:
