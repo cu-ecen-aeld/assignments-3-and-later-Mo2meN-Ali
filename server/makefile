@@ -1,6 +1,6 @@
 
 DIR=
-CCFLAGS= -Wall -g -pthread
+CCFLAGS= -Wall -g -pthread -O0
 
 ifeq ($(CROSS_COMPILE), aarch64-none-linux-gnu-)
 	CC=aarch64-none-linux-gnu-g++

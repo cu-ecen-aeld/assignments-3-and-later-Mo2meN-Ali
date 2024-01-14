@@ -117,10 +117,10 @@ int main(int argc, char *argv[])
 
 void *server_thread(void *args)
 {
-    int i, numOfBytes = 0;
+    int numOfBytes = 0;
     char *fileBuffer = 
         static_cast<char *>(malloc(sizeof(char) * SERVER_MSG_LEN));
-    unsigned int j;
+    unsigned int i, j;
     struct server::thread_args *pThreadArgs =
         static_cast<struct server::thread_args *>(args);
 
@@ -135,11 +135,11 @@ void *server_thread(void *args)
         if (-1 == numOfBytes) {
             perror("recv():");
         }
+        // printf("pThreadArgs->msgLen = %d, numOfBytes received = %d\n\n",
+        //         pThreadArgs->msgLen, numOfBytes);
         if (0 != numOfBytes) {
             i = j = 0;
-            // printf("pThreadArgs->msgLen = %d, numOfBytes received = %d\n\n",
-            //     pThreadArgs->msgLen, numOfBytes);
-            while ((i < numOfBytes) &&
+            while ((i < pThreadArgs->msgLen) &&
                    ('\0' != pThreadArgs->msg[i])) {
                 while ((LF != pThreadArgs->msg[i])   &&
                        (CR != pThreadArgs->msg[i])   &&
@@ -147,38 +147,33 @@ void *server_thread(void *args)
                        ('\0' != pThreadArgs->msg[i])) {
                     fileBuffer[j++] = pThreadArgs->msg[i++];
                 }
-                if (LF  == pThreadArgs->msg[i]) {
-                    fileBuffer[j++] = LF;
-                    puts("LF");
+                // printf("strlen(pThreadArgs->msg) = %lu, numOfBytes received = %d\n\n",
+                //         strlen(pThreadArgs->msg), numOfBytes);
+                if (LF == pThreadArgs->msg[i]) {
+                    fileBuffer[j] = LF;
                 } else if ((CR == pThreadArgs->msg[i++]) && 
                            (LF == pThreadArgs->msg[i])) {
                     fileBuffer[j++] = CR;
-                    fileBuffer[j++] = LF;
-                    puts("CR&LF");
+                    fileBuffer[j] = LF;
                 } else if (CR  == pThreadArgs->msg[i]) {
-                    fileBuffer[j++] = CR;
+                    fileBuffer[j] = CR;
                 } else if (CRLF == pThreadArgs->msg[i]) {
-                    fileBuffer[j++] = CRLF;
-                    puts("CRLF");
+                    fileBuffer[j] = CRLF;
+                } else {
+                    fileBuffer[j] = LF;
                 }
                 j = 0;
                 ++i;
                 fseek(pThreadArgs->pFile, 0, SEEK_END);
-                // printf("fileBuffer = %s, pThreadsArgs->msg = %s\n\n",
-                //     fileBuffer, pThreadArgs->msg);
-                fprintf(pThreadArgs->pFile, "%s", fileBuffer);
+                fwrite(fileBuffer, strlen(fileBuffer), 1, pThreadArgs->pFile);
                 fflush(pThreadArgs->pFile);
                 memset(fileBuffer, '\0', SERVER_MSG_LEN);
                 rewind(pThreadArgs->pFile);
-                while (j < SERVER_MSG_LEN) {
-                    fileBuffer[j] = fgetc(pThreadArgs->pFile);
-                    if (EOF == fileBuffer[j]) {
-                        break;
-                    }
-                    ++j;
-                }
+                fread(fileBuffer, SERVER_MSG_LEN, 1, pThreadArgs->pFile);
                 fflush(pThreadArgs->pFile);
-                fileBuffer[j] = '\0';
+                // printf("fileBuffer = %s, pThreadsArgs->msg = %s\n\n",
+                //     fileBuffer, pThreadArgs->msg);
+
                 numOfBytes = send(pThreadArgs->socketfd, fileBuffer,
                                 strlen(fileBuffer), 0);
                 if (-1 == numOfBytes) {
@@ -186,7 +181,6 @@ void *server_thread(void *args)
                 }
                 // printf("numOfBytes sent: %d, strlen(fileBuffer) = %lu\n",
                 //     numOfBytes, strlen(fileBuffer));
-                j = 0;
                 memset(fileBuffer, '\0', SERVER_MSG_LEN);
             }
         }

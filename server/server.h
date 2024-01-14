@@ -66,8 +66,6 @@ public:
         hints(h), resInfo(r), socketfd(-1), numOfThreads(0)
     { 
         strncpy(service, s, sizeof(service)); 
-        /* Debugging */ 
-        puts("\nFull input ctor\n"); 
     } 
 
     ~server() 
