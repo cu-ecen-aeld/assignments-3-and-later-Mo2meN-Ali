@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 extern "C" {
 struct timestamp_args {
