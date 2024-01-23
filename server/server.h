@@ -17,7 +17,7 @@
 #ifdef __cplusplus
 extern "C" {
 
-constexpr int THREAD_MAX = 20;
+constexpr int THREAD_MAX = 100;
 
 /*
  * struct addrinfo {
@@ -36,11 +36,12 @@ class server {
 public:
     struct thread_args {
         bool isComplete;      // Thread completion status flag
-        int socketfd;         // The socket representing this user
-        unsigned int  msgLen; // Size of the buffer
+        int  socketfd;        // The socket representing this user
+        unsigned int msgLen;  // Size of the buffer
         char *msg;            // The buffer to hold messages
         pthread_t threadId;
         FILE *pFile;
+        pthread_mutex_t *fileMutex;
     };
 
     server():
@@ -66,8 +67,6 @@ public:
         hints(h), resInfo(r), socketfd(-1), numOfThreads(0)
     { 
         strncpy(service, s, sizeof(service)); 
-        /* Debugging */ 
-        puts("\nFull input ctor\n"); 
     } 
 
     ~server() 
@@ -80,7 +79,7 @@ public:
             freeaddrinfo(resInfo);
         }
         for (int i = 0; i < numOfThreads; ++i) { // Clean memory after each thread
-            printf("~Free thread %d\n\n", i);
+            printf("~Free thread %d\n\n", i + 1);
             free(pThreadArgs[i]->msg);
             free(pThreadArgs[i]);
         }
@@ -155,15 +154,17 @@ public:
         return EXIT_SUCCESS;
     }
 
-    int initServerThread(int commSocket, void *server_thread(void *threadArgs), 
-                         int msgLen, FILE *userFile)
+    pthread_t initServerThread(int commSocket, void *server_thread(void *threadArgs), 
+                               int msgLen, FILE *userFile, pthread_mutex_t *fileMutex) // Returns the threadID in case of success, -1 otherwise.
     {
         int status = -1;
+        pthread_t threadID = -1;
 
         if (numOfThreads >= THREAD_MAX) {
             return status;
         }
-        pThreadArgs[numOfThreads] = static_cast<struct thread_args *>(malloc(sizeof(struct thread_args)));
+        pThreadArgs[numOfThreads] = 
+            static_cast<struct thread_args *>(malloc(sizeof(struct thread_args)));
         if (NULL != pThreadArgs) {
             pThreadArgs[numOfThreads]->isComplete = false;
             pThreadArgs[numOfThreads]->socketfd   = commSocket;
@@ -178,15 +179,19 @@ public:
         }
         pThreadArgs[numOfThreads]->pFile = userFile;
         status = pthread_create(&pThreadArgs[numOfThreads]->threadId, NULL, 
-                    server_thread, static_cast<void *>(pThreadArgs[numOfThreads]));
+                                server_thread, 
+                                static_cast<void *>(pThreadArgs[numOfThreads]));
         if (0 != status) {
             errno = status;
             perror("pthread_create():");
             return -1;
         }
+        pThreadArgs[numOfThreads]->fileMutex = fileMutex;
+        threadID = pThreadArgs[numOfThreads]->threadId;
         ++numOfThreads;
         printf("Number of thread(s) equal %d\n\n", numOfThreads);
-        return status;
+        
+        return threadID;
     }
 
     pthread_t getThreadId(int threadNum)
