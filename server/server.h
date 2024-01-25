@@ -89,6 +89,7 @@ public:
     virtual int create(int backlog)
     {
         int status;
+        int optval = 1;
 
         status = getaddrinfo(NULL, service, &hints, &resInfo);
         if (0 != status) {
@@ -100,6 +101,20 @@ public:
         if (-1 == socketfd) {    
             perror("socket():");
             return socketfd;
+        }
+        status = setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, 
+                            &optval, sizeof(int));
+        if (-1 == status)
+        {
+            perror("setsockopt():");
+            return status;
+        }
+        status = setsockopt(socketfd, SOL_SOCKET, SO_REUSEPORT, 
+                            &optval, sizeof(int));
+        if (-1 == status)
+        {
+            perror("setsockopt():");
+            return status;
         }
         status = bind(socketfd, resInfo->ai_addr, resInfo->ai_addrlen);
         if (0 != status) {

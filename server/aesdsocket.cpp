@@ -206,22 +206,24 @@ void *server_thread(void *args)
                 } else {
                     printf("Mutex locked, thread ID: %lu\n", pthread_self());
                 }
-                fseek(pThreadArgs->pFile, 0, SEEK_END);
-                fwrite(fileBuffer, strlen(fileBuffer), 1, pThreadArgs->pFile);
-                memset(fileBuffer, '\0', SERVER_MSG_LEN);
-                rewind(pThreadArgs->pFile);
-                fread(fileBuffer, SERVER_MSG_LEN, 1, pThreadArgs->pFile);
-                mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
-                if (0 != mutexRes) {
-                    puts("Mutex unlocking Error");
-                    do {
-                        usleep(10000);
-                        printf("unlock not ready, thread ID: %lu\n", 
-                            pthread_self());
-                        mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
-                    } while((0 != mutexRes) && (k++ < noOfRetries));
-                } else {
-                    printf("Mutex unlocked, thread ID: %lu\n", pthread_self());
+                if (0 == mutexRes) {
+                    fseek(pThreadArgs->pFile, 0, SEEK_END);
+                    fwrite(fileBuffer, strlen(fileBuffer), 1, pThreadArgs->pFile);
+                    memset(fileBuffer, '\0', SERVER_MSG_LEN);
+                    rewind(pThreadArgs->pFile);
+                    fread(fileBuffer, SERVER_MSG_LEN, 1, pThreadArgs->pFile);
+                    mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
+                    if (0 != mutexRes) {
+                        puts("Mutex unlocking Error");
+                        do {
+                            usleep(10000);
+                            printf("unlock not ready, thread ID: %lu\n", 
+                                pthread_self());
+                            mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
+                        } while((0 != mutexRes) && (k++ < noOfRetries));
+                    } else {
+                        printf("Mutex unlocked, thread ID: %lu\n", pthread_self());
+                    }
                 }
                 numOfBytes = send(pThreadArgs->socketfd, fileBuffer,
                                 strlen(fileBuffer), 0);
@@ -232,7 +234,7 @@ void *server_thread(void *args)
             }
         }
         memset(pThreadArgs->msg, 0, pThreadArgs->msgLen);
-        sleep(1);
+        usleep(500000); // sleep for 0.5 second
     } while (1);
     free(fileBuffer);
     pThreadArgs->isComplete = true;
@@ -243,15 +245,7 @@ void *server_thread(void *args)
 pthread_t timestamp_thread_init(uint32_t strLen, 
                                 pthread_mutex_t *fileMutex, FILE *pFile)
 {
-// Init timer
     struct itimerval itv;
-
-    itv.it_value.tv_sec     = 0;
-    itv.it_value.tv_usec    = 1000;
-    itv.it_interval.tv_sec  = 10;
-    itv.it_interval.tv_usec = 0;
-    setitimer(ITIMER_REAL, &itv, NULL);
-
 // Init args data structure
     struct timestamp_args *pTimestamp_args = 
         static_cast<struct timestamp_args *>(malloc(sizeof(struct timestamp_args)));
@@ -260,9 +254,16 @@ pthread_t timestamp_thread_init(uint32_t strLen,
     pTimestamp_args->fileMutex = fileMutex;
     pTimestamp_args->pFile     = pFile;
     pTimestamp_args->timestamp_len = strLen;
-// Creat the actual thread
+// Create the actual thread
     pthread_create(&(pTimestamp_args->threadID), NULL, 
                    timestamp_thread, static_cast<void *>(pTimestamp_args));
+// Init timer
+    itv.it_value.tv_sec     = 0;
+    itv.it_value.tv_usec    = 10;
+    itv.it_interval.tv_sec  = 10;
+    itv.it_interval.tv_usec = 0;
+    setitimer(ITIMER_REAL, &itv, NULL);
+
     return (pTimestamp_args->threadID);
 }
 
@@ -298,7 +299,7 @@ void *timestamp_thread(void *args)
                 free(fileBuffer);
                 free(pTimestamp_args->sTimeStamp_RFC2822);
                 free(pTimestamp_args);
-                exit(EXIT_FAILURE);
+                pthread_exit(NULL);
             }
             strftime(pTimestamp_args->sTimeStamp_RFC2822, 
                     pTimestamp_args->timestamp_len, "%a, %d %b %Y %T %z", timestamp);
@@ -309,12 +310,6 @@ void *timestamp_thread(void *args)
             printf("pTimestamp_args->sTimeStamp_RFC2822: %s\n", 
                 pTimestamp_args->sTimeStamp_RFC2822);
             printf("fileBuffer: %s\n", fileBuffer);
-            // mutexRes = pthread_mutex_lock(pTimestamp_args->fileMutex);
-            // if (0 == mutexRes) {
-            //     fwrite(fileBuffer, strlen(fileBuffer), 1, pTimestamp_args->pFile);  // Log to the file
-            //     fflush(pTimestamp_args->pFile);
-            //     pthread_mutex_unlock(pTimestamp_args->fileMutex);
-            // } 
             mutexRes = pthread_mutex_lock(pTimestamp_args->fileMutex);
             if (0 != mutexRes) {
                 puts("Mutex locking Error");
@@ -327,24 +322,25 @@ void *timestamp_thread(void *args)
             } else {
                 printf("Mutex locked, thread ID: %lu\n", pthread_self());
             }
-            fwrite(fileBuffer, strlen(fileBuffer), 1, pTimestamp_args->pFile);  // Log to the file
-            fflush(pTimestamp_args->pFile);
-            pthread_mutex_unlock(pTimestamp_args->fileMutex);
-            mutexRes = pthread_mutex_unlock(pTimestamp_args->fileMutex);
-            if (0 != mutexRes) {
-                puts("Mutex unlocking Error");
-                do {
-                    usleep(10000);
-                    printf("unlock not ready, thread ID: %lu\n", 
-                        pthread_self());
-                    mutexRes = pthread_mutex_unlock(pTimestamp_args->fileMutex);
-                } while((0 != mutexRes) && (k++ < noOfRetries));
-            } else {
-                printf("Mutex unlocked, thread ID: %lu\n", pthread_self());
-            }
-                     
+            if (0 == mutexRes) {
+                fwrite(fileBuffer, strlen(fileBuffer), 1, pTimestamp_args->pFile);  // Log to the file
+                fflush(pTimestamp_args->pFile);
+                pthread_mutex_unlock(pTimestamp_args->fileMutex);
+                mutexRes = pthread_mutex_unlock(pTimestamp_args->fileMutex);
+                if (0 != mutexRes) {
+                    puts("Mutex unlocking Error");
+                    do {
+                        usleep(10000);
+                        printf("unlock not ready, thread ID: %lu\n", 
+                            pthread_self());
+                        mutexRes = pthread_mutex_unlock(pTimestamp_args->fileMutex);
+                    } while((0 != mutexRes) && (k++ < noOfRetries));
+                } else {
+                    printf("Mutex unlocked, thread ID: %lu\n", pthread_self());
+                }
+            }      
         }
-        sleep(10);
+        sleep(5);
     }
     return(EXIT_SUCCESS);     
 }
