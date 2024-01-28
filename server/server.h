@@ -17,8 +17,8 @@
 #ifdef __cplusplus
 extern "C" {
 
-constexpr int THREAD_MAX = 100;
-
+constexpr int THREAD_MAX            = 100;
+constexpr unsigned char IP_ADDR_LEN =  20;
 /*
  * struct addrinfo {
         int              ai_flags;
@@ -154,19 +154,19 @@ public:
         return recv(commSocket, msg, msgLen, 0);
     }
 
-    int getIpAddr(char *ipAddr)
+    char *getIpAddr(void)
     {
+        static char ipAddr[IP_ADDR_LEN];
+
         if (AF_INET6 == resInfo->ai_family) {
             struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)resInfo->ai_addr;
             inet_ntop(resInfo->ai_family, &(ipv6->sin6_addr), ipAddr, sizeof(ipAddr));
         } else if (AF_INET == resInfo->ai_family) {
             struct sockaddr_in *ipv4 = (struct sockaddr_in *)resInfo->ai_addr;
             inet_ntop(resInfo->ai_family, &(ipv4->sin_addr), ipAddr, sizeof(ipAddr));
-        } else {
-            return EXIT_FAILURE;
         }
 
-        return EXIT_SUCCESS;
+        return ipAddr;
     }
 
     pthread_t initServerThread(int commSocket, void *server_thread(void *threadArgs), 

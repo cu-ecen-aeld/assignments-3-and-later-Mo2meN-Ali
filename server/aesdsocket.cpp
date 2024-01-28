@@ -9,7 +9,6 @@
 
 constexpr unsigned int  SERVER_MSG_LEN = 100000;
 constexpr unsigned char BUFFER_LEN     = 100;
-constexpr unsigned char IP_ADDR_LEN    = 20;
 constexpr unsigned char LF   = 0x0A;
 constexpr unsigned char CR   = 0x0D;
 constexpr unsigned char CRLF = 0xDA;
@@ -41,7 +40,6 @@ int main(int argc, char *argv[])
 {
     int prog_status = EXIT_SUCCESS;
     pthread_t portList[THREAD_MAX];
-    char syslogBuffer[BUFFER_LEN] = {'\0'};
     unsigned char i   =  1;
     int listenPort    = -1;
     struct sigaction signalsAct;
@@ -112,9 +110,7 @@ int main(int argc, char *argv[])
                 portList[i] = ipServer.getThreadId(i - 1);
                 printf("Created new thread %lu\n\n", portList[i]);
                 ++i;
-                strcpy(syslogBuffer, "Accepted connection from ");
-                ipServer.getIpAddr(syslogBuffer + strlen(syslogBuffer));
-                syslog(LOG_DEBUG, syslogBuffer);
+                syslog(LOG_DEBUG, "Accepted connection from %s", ipServer.getIpAddr());
             }
         }
     }
