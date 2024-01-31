@@ -165,6 +165,8 @@ void *server_thread(void *args)
         if (-1 == numOfBytes) {
             perror("recv():");
         }
+        // printf("pThreadArgs->msgLen = %d, numOfBytes received = %d\n\n",
+        //         pThreadArgs->msgLen, numOfBytes);
         if (0 != numOfBytes) {
             i = j = 0;
             while ((i < pThreadArgs->msgLen) &&
