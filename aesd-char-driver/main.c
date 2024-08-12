@@ -16,6 +16,7 @@
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/cdev.h>
+#include <linux/slab.h>
 #include <linux/fs.h> // file_operations
 #include "aesdchar.h"
 int aesd_major =   0; // use dynamic major
@@ -24,14 +25,18 @@ int aesd_minor =   0;
 MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
 MODULE_LICENSE("Dual BSD/GPL");
 
+struct aesd_circular_buffer buffer_dev; // A circular buffer
 struct aesd_dev aesd_device;
 
 int aesd_open(struct inode *inode, struct file *filp)
 {
+    struct aesd_dev *devPtr;
     PDEBUG("open");
     /**
      * TODO: handle open
      */
+    devPtr = container_of(inode->i_cdev, struct aesd_dev, cdev);
+    filp->private_data = devPtr;
     return 0;
 }
 
@@ -41,6 +46,7 @@ int aesd_release(struct inode *inode, struct file *filp)
     /**
      * TODO: handle release
      */
+    /** \c Nothing to do here */
     return 0;
 }
 
@@ -63,6 +69,11 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     /**
      * TODO: handle write
      */
+    // PDEBUG("Received from the user: %s\n", buf);
+    // PDEBUG("Last character from the user buffer is: %d, %c\n", 
+    //     buf[count], buf[count]);
+
+
     return retval;
 }
 struct file_operations aesd_fops = {
@@ -79,7 +90,6 @@ static int aesd_setup_cdev(struct aesd_dev *dev)
 
     cdev_init(&dev->cdev, &aesd_fops);
     dev->cdev.owner = THIS_MODULE;
-    dev->cdev.ops = &aesd_fops;
     err = cdev_add (&dev->cdev, devno, 1);
     if (err) {
         printk(KERN_ERR "Error %d adding aesd cdev", err);
@@ -87,9 +97,7 @@ static int aesd_setup_cdev(struct aesd_dev *dev)
     return err;
 }
 
-
-
-int aesd_init_module(void)
+int __init aesd_init_module(void)
 {
     dev_t dev = 0;
     int result;
@@ -105,6 +113,8 @@ int aesd_init_module(void)
     /**
      * TODO: initialize the AESD specific portion of the device
      */
+    /** no need to call \c aesd_circular_buffer_init() since we already sat the whole struct to 0 */
+    mutex_init(&aesd_device.lock);
 
     result = aesd_setup_cdev(&aesd_device);
 
@@ -115,20 +125,23 @@ int aesd_init_module(void)
 
 }
 
-void aesd_cleanup_module(void)
+void __exit aesd_cleanup_module(void)
 {
     dev_t devno = MKDEV(aesd_major, aesd_minor);
-
+    unsigned char i;
     cdev_del(&aesd_device.cdev);
 
     /**
-     * TODO: cleanup AESD specific poritions here as necessary
+     * TODO: cleanup AESD specific portions here as necessary
      */
-
+    // Free the allocated circular buffer
+    for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; ++i) {
+        if (NULL != buffer_dev.entry[i].buffptr) {  // Is it allocated?
+            kfree(buffer_dev.entry[i].buffptr); // free it then
+        }
+    }
     unregister_chrdev_region(devno, 1);
 }
-
-
 
 module_init(aesd_init_module);
 module_exit(aesd_cleanup_module);

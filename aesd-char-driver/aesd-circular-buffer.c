@@ -12,12 +12,10 @@
 #include <linux/string.h>
 #else
 #include <string.h>
+#include <stdio.h>  
 #endif
 
 #include "aesd-circular-buffer.h"
-
-#include <stdio.h>   
-
 
 /**
  * @param buffer the buffer to search for corresponding offset.  Any necessary locking must be performed by caller.
@@ -37,19 +35,19 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
     /**
     * TODO: implement per description
     */
+    int buffer_size        = 0;
     int buffer_counter     = buffer->out_offs;
     int total_char_size    = 0;
     int i                  = 0;
     int offset             = 0;
     *entry_offset_byte_rtn = 0;
-
-    int buffer_size     = 
-        (true == buffer->full) ? 
-            AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED + buffer->out_offs: buffer->in_offs;
+    
     if (NULL == buffer) {
         return NULL;
     }
 
+    buffer_size = (true == buffer->full) ? 
+        AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED + buffer->out_offs : buffer->in_offs;
     /*
         We need to read n of element from the circular buffer,
         but we want to read the elements into the right order that is why
