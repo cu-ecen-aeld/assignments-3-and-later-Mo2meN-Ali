@@ -30,8 +30,7 @@ struct aesd_dev
     /**
      * TODO: Add structure(s) and locks needed to complete assignment requirements
      */
-    unsigned int numb_of_elements_alloc;  // Keep track of how many elements are in the buffer
-    struct aesd_circular_buffer cbuffer;
+    struct aesd_circular_buffer *pbuffer;
     struct mutex lock;
     struct cdev cdev;     /* Char device structure      */
 };
