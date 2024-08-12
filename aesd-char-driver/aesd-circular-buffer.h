@@ -10,13 +10,22 @@
 
 #ifdef __KERNEL__
 #include <linux/types.h>
+#include <linux/slab.h>
+#define MALLOC(size)     kmalloc(size, GFP_KERNEL)
+#define FREE(item)       kfree(item)
 #else
 #include <stddef.h> // size_t
 #include <stdint.h> // uintx_t
 #include <stdbool.h>
+#include <stdlib.h>
+#define MALLOC(size)     malloc(size)
+#define FREE(item)       free(item)
 #endif
 
 #define AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED (10U)
+
+#define FAIL        (1U)
+#define SUCCESS     (0U)
 
 struct aesd_buffer_entry
 {
@@ -57,6 +66,11 @@ extern struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos
 extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
+
+extern void aesd_circular_buffer_increment_buffer(struct aesd_circular_buffer *buffer);
+
+extern size_t aesd_circular_buffer_append_entry(struct aesd_circular_buffer *buffer, 
+                                         const struct aesd_buffer_entry *append_entry);
 
 /**
  * Create a for loop to iterate over each member of the circular buffer.
