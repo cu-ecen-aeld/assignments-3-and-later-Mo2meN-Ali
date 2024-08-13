@@ -22,10 +22,9 @@
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
-MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
+MODULE_AUTHOR("Momen"); /** TODO: fill in your name **/
 MODULE_LICENSE("Dual BSD/GPL");
 
-struct aesd_circular_buffer buffer_dev; // A circular buffer
 struct aesd_dev aesd_device;
 
 int aesd_open(struct inode *inode, struct file *filp)
@@ -65,8 +64,12 @@ ssize_t aesd_write(struct file *filp, const char __user *buff, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = -ENOMEM;
+    struct aesd_dev *dev = filp->private_data;
     static bool is_new_write = true;  // A new write or append?
-    struct aesd_buffer_entry *tmp_read_user_input_entry = NULL;
+    struct aesd_buffer_entry *buffer_read_user_input_entry      = NULL; // This buffer reads from the user space
+    static struct aesd_buffer_entry *full_read_user_input_entry = NULL; // This buffer contains a full read
+    char *tmp_read_user_input_buff = NULL; // This buffer acts a temp buffer for partial reads
+
 
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
     /**
@@ -78,53 +81,96 @@ ssize_t aesd_write(struct file *filp, const char __user *buff, size_t count,
     /* 
     * Allocate and cope user buffer in
     */
-    tmp_read_user_input_entry = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
-    if (NULL == tmp_read_user_input_entry) {
-        PDEBUG("aesd_write(): could not allocate tmp_read_user_input_entry");
+    buffer_read_user_input_entry = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
+    if (NULL == buffer_read_user_input_entry) {
+        PDEBUG("aesd_write(): could not allocate buffer_read_user_input_entry");
         goto out;
     }
-    tmp_read_user_input_entry->buffptr = kmalloc(sizeof(char) * count, GFP_KERNEL);
-    if (NULL == tmp_read_user_input_entry->buffptr) {
-        PDEBUG("aesd_write(): could not allocate tmp_read_user_input_entry->buffptr");
+    buffer_read_user_input_entry->buffptr = kmalloc(sizeof(char) * count, GFP_KERNEL);
+    if (NULL == buffer_read_user_input_entry->buffptr) {
+        PDEBUG("aesd_write(): could not allocate buffer_read_user_input_entry->buffptr");
         goto out;     
     }
-    if (copy_from_user((void *)tmp_read_user_input_entry->buffptr, buff, count)) {
+    if (copy_from_user((void *)buffer_read_user_input_entry->buffptr, buff, count)) {
         retval = -EFAULT;
         goto out;
     }
-    tmp_read_user_input_entry->size = count;  // Set entry size
-    PDEBUG("\n***Received from the user: %s\n", tmp_read_user_input_entry->buffptr);
-    PDEBUG("Number of characters: %ld\n", tmp_read_user_input_entry->size);
+    buffer_read_user_input_entry->size = count;  // Set entry size
+
+    PDEBUG("\n***Received from the user: %s\n", buffer_read_user_input_entry->buffptr);
+    PDEBUG("Number of characters: %ld\n", buffer_read_user_input_entry->size);
     PDEBUG("Last character from the user buffer is: %d, %c\n", 
-            tmp_read_user_input_entry->buffptr[count - 1], 
-            tmp_read_user_input_entry->buffptr[count - 1]);
+            buffer_read_user_input_entry->buffptr[count - 1], 
+            buffer_read_user_input_entry->buffptr[count - 1]);
     /**
      * Check full and partial writes and call the appropriate aesd function interface
+     * Addresses that are eventually going into the circular buffer are not freed here,
+     *  but into the release function of the driver, only temp mallocs are being freed here.
      */
     if (true == is_new_write) {
         PDEBUG("A new write buffer");
-        if ('\n' == tmp_read_user_input_entry->buffptr[count - 1]) { // Check new line received or not?
-            PDEBUG("Full write command\n");
-            aesd_circular_buffer_add_entry(aesd_device.pbuffer, tmp_read_user_input_entry);
+        
+        if ('\n' == buffer_read_user_input_entry->buffptr[count - 1]) { // Check new line received or not?
+            PDEBUG("Full write command, buffer is %s\n", 
+                buffer_read_user_input_entry->buffptr);
+            // Delete older entry's buffer if full
+            if (dev->pbuffer->full) {
+                tmp_read_user_input_buff = aesd_circular_buffer_ref_buff(dev->pbuffer);
+                kfree(tmp_read_user_input_buff);
+            }
+            aesd_circular_buffer_add_entry(aesd_device.pbuffer, buffer_read_user_input_entry);
         } else {
             PDEBUG("A partial write buffer\n");
+            full_read_user_input_entry = kmalloc(sizeof(struct aesd_buffer_entry), GFP_KERNEL);
+            if (NULL == full_read_user_input_entry) {
+                PDEBUG("aesd_write(): could not allocate full_read_user_input_entry");
+                goto out;
+            }
+            full_read_user_input_entry->buffptr = kmalloc(sizeof(char) * count, GFP_KERNEL);
+            if (NULL == full_read_user_input_entry->buffptr) {
+                PDEBUG("aesd_write(): could not allocate full_read_user_input_entry->buffptr");
+                goto out;     
+            }
+            memcpy((char *)full_read_user_input_entry->buffptr, 
+                buffer_read_user_input_entry->buffptr, 
+                buffer_read_user_input_entry->size);
+            full_read_user_input_entry->size = buffer_read_user_input_entry->size;
+            kfree(buffer_read_user_input_entry);
             is_new_write = false;
-            aesd_circular_buffer_add_entry(aesd_device.pbuffer, tmp_read_user_input_entry);
         }
-    } else { // Parital write
-        PDEBUG("Continue a partial write\n");
-        is_new_write = false;
-        aesd_circular_buffer_append_entry(aesd_device.pbuffer, tmp_read_user_input_entry);
-        if ('\n' == tmp_read_user_input_entry->buffptr[count - 1]) { // Final part of the write?
-            aesd_circular_buffer_increment_buffer(aesd_device.pbuffer);
-            is_new_write = true; // prepare for a new write
+    } else { // Parital write continue
+        tmp_read_user_input_buff = (char *)full_read_user_input_entry->buffptr;
+        full_read_user_input_entry->buffptr = 
+            kmalloc(sizeof(char) * (full_read_user_input_entry->size + count), GFP_KERNEL);
+        if (NULL == full_read_user_input_entry->buffptr) {
+            PDEBUG("aesd_write(): could not re-allocate full_read_user_input_entry->buffptr");
+            goto out;     
+        }
+        memcpy((char *)full_read_user_input_entry->buffptr, 
+            tmp_read_user_input_buff, 
+            full_read_user_input_entry->size);
+        memcpy((char *)full_read_user_input_entry->buffptr + full_read_user_input_entry->size, 
+            buffer_read_user_input_entry->buffptr, count);
+        full_read_user_input_entry->size += count;
+        kfree(tmp_read_user_input_buff); // Release the old memory used for partial reads
+        PDEBUG("Continue a partial write, buffer is %s\n", 
+            full_read_user_input_entry->buffptr);
+        if ('\n' == buffer_read_user_input_entry->buffptr[count - 1]) { // Final part of the write?
+            // Delete older entry's buffer if full
+            if (dev->pbuffer->full) {
+                tmp_read_user_input_buff = aesd_circular_buffer_ref_buff(dev->pbuffer);
+                kfree(tmp_read_user_input_buff);
+            }
+            aesd_circular_buffer_add_entry(aesd_device.pbuffer, 
+                full_read_user_input_entry);
+            is_new_write = true; // prepare for the next new write
             PDEBUG("End of a partial write!\n");
+
         }
     }
     retval = count; // Return the number of bytes written in case of sucess
 
 out:
-    kfree(tmp_read_user_input_entry);
     mutex_unlock(&aesd_device.lock);
     return retval;
 }
@@ -167,18 +213,21 @@ int __init aesd_init_module(void)
      */
     aesd_device.pbuffer = kmalloc(1 * sizeof(struct aesd_circular_buffer), GFP_KERNEL);
     if (NULL == aesd_device.pbuffer) {
-        return -ENOMEM;
+        result = -ENOMEM;
+        goto fail;
     }
     aesd_circular_buffer_init(aesd_device.pbuffer);
     mutex_init(&aesd_device.lock);
 
     result = aesd_setup_cdev(&aesd_device);
+    if (result) 
+        goto fail;
 
-    if( result ) {
-        unregister_chrdev_region(dev, 1);
-    }
+    return 0;
+
+fail:    
+    unregister_chrdev_region(dev, 1);
     return result;
-
 }
 
 void __exit aesd_cleanup_module(void)
@@ -193,7 +242,7 @@ void __exit aesd_cleanup_module(void)
     // Free the allocated circular buffer
     for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; ++i) {
         if (NULL != aesd_device.pbuffer->entry[i].buffptr) {  // Is it allocated?
-            kfree(buffer_dev.entry[i].buffptr); // free it then
+            kfree(aesd_device.pbuffer->entry[i].buffptr); // free it then
         }
     }
     kfree(aesd_device.pbuffer); // Free the struct
