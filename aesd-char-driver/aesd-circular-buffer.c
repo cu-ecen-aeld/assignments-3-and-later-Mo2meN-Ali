@@ -35,52 +35,31 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
     /**
     * TODO: implement per description
     */
-    int buffer_size        = 0;
-    int buffer_counter     = 0;
-    int total_char_size    = 0;
-    int i                  = 0;
-    int offset             = 0;
+    unsigned int entry_size      = 0;
+    unsigned int entry_counter   = buffer->out_offs;
+    unsigned int total_char_size = 0;
+    unsigned int prev_char_size  = 0;
     *entry_offset_byte_rtn = -1;
     
     if (NULL == buffer) {
         return NULL;
     }
-
-    // printk(KERN_DEBUG "1- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
-    buffer_counter = (true == buffer->full) ? buffer->in_offs : 0;
-    buffer_size = (true == buffer->full) ? 
+    entry_size = (true == buffer->full) ? 
         AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED + buffer->in_offs : buffer->in_offs;
     /*
         We need to read n of element from the circular buffer,
         but we want to read the elements into the right order that is why
         we need two counters: one for the number of elements and another for the right indices
     */
-    while (buffer_counter < buffer_size) {
+    while (entry_counter < entry_size) {
+        prev_char_size   = total_char_size;
         total_char_size += 
-            buffer->entry[buffer_counter % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED].size;
-        ++buffer_counter;
-        // printk(KERN_DEBUG "2- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
-        if (total_char_size >= char_offset) {
-            i      = buffer->in_offs; 
-            offset = char_offset;
-            // printk(KERN_DEBUG "3- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
-            /*
-                We need to read n of element from the circular buffer,
-                but we want to read the elements into the right order that is why
-                we need two counters: one for the number of elements and another for the right indices
-            */
-            while (i < buffer_counter) {
-                // printk(KERN_DEBUG "4- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
-                if (offset < 
-                    buffer->entry[i % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED].size) {
-                    *entry_offset_byte_rtn = offset;
-                    return &buffer->entry[i % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED];
-                }
-                offset = 
-                    offset - buffer->entry[i % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED].size;
-                ++i;
-            }
+            buffer->entry[entry_counter % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED].size;
+        if (char_offset < total_char_size) {   // char lies into this element?
+            *entry_offset_byte_rtn = char_offset - prev_char_size;        
+            return &buffer->entry[entry_counter % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED];
         }
+        ++entry_counter;
     }
     return NULL;
 }
@@ -99,15 +78,15 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer,
     * TODO: implement per description
     */
     buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
-    buffer->entry[buffer->in_offs].size    = add_entry->size;   
+    buffer->entry[buffer->in_offs].size    = add_entry->size; 
+    if (buffer->full) 
+        buffer->out_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     if (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED == (buffer->in_offs + 1)) {  // The next entry would be out-of-bounds?
         buffer->full     = true; // buffer is full
         buffer->in_offs  = 0;    // rewrite the oldest entry next time 
     } else { 
         ++buffer->in_offs;
     }
-    if (buffer->full) 
-        buffer->out_offs = buffer->in_offs + 1;
 }
 
 /**
