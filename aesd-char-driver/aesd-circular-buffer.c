@@ -36,16 +36,18 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
     * TODO: implement per description
     */
     int buffer_size        = 0;
-    int buffer_counter     = buffer->in_offs;
+    int buffer_counter     = 0;
     int total_char_size    = 0;
     int i                  = 0;
     int offset             = 0;
-    *entry_offset_byte_rtn = 0;
+    *entry_offset_byte_rtn = -1;
     
     if (NULL == buffer) {
         return NULL;
     }
 
+    // printk(KERN_DEBUG "1- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
+    buffer_counter = (true == buffer->full) ? buffer->in_offs : 0;
     buffer_size = (true == buffer->full) ? 
         AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED + buffer->in_offs : buffer->in_offs;
     /*
@@ -57,15 +59,18 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
         total_char_size += 
             buffer->entry[buffer_counter % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED].size;
         ++buffer_counter;
+        // printk(KERN_DEBUG "2- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
         if (total_char_size >= char_offset) {
             i      = buffer->in_offs; 
             offset = char_offset;
+            // printk(KERN_DEBUG "3- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
             /*
                 We need to read n of element from the circular buffer,
                 but we want to read the elements into the right order that is why
                 we need two counters: one for the number of elements and another for the right indices
             */
             while (i < buffer_counter) {
+                // printk(KERN_DEBUG "4- buffer %p, char_offset %d, entry_offset_byte = %d\n", buffer, char_offset, entry_offset_byte_rtn);
                 if (offset < 
                     buffer->entry[i % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED].size) {
                     *entry_offset_byte_rtn = offset;
@@ -94,7 +99,7 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer,
     * TODO: implement per description
     */
     buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
-    buffer->entry[buffer->in_offs].size    = add_entry->size;    
+    buffer->entry[buffer->in_offs].size    = add_entry->size;   
     if (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED == (buffer->in_offs + 1)) {  // The next entry would be out-of-bounds?
         buffer->full     = true; // buffer is full
         buffer->in_offs  = 0;    // rewrite the oldest entry next time 
@@ -115,6 +120,58 @@ char *aesd_circular_buffer_ref_buff(struct aesd_circular_buffer *buffer)
     return (char *)buffer->entry[buffer->in_offs].buffptr;
 }
 
+/**
+ * Returns a pointer to the entry containing the offset @param char_offset
+ * Reads an entry from the buffer @param buffer starting from the offset @param char_offset
+ * Any necessary locking must be handled by the caller
+ * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+ */
+struct aesd_buffer_entry *aesd_circular_buffer_read_entry(struct aesd_circular_buffer *buffer, 
+                                                          size_t offset_byte)
+{
+    size_t entry_offset_byte = -1;  // Set to an invalid value
+    // struct aesd_buffer_entry *pbuffer_entry = NULL;
+
+    return aesd_circular_buffer_find_entry_offset_for_fpos(
+                        buffer, offset_byte, &entry_offset_byte);
+}
+
+
+/** Print the content of the circular buffer @param buffer 
+ * Any necessary locking must be handled by the caller
+ * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
+*/
+void aesd_circular_buffer_show(struct aesd_circular_buffer *buffer)
+{
+    int i, buffer_iterator = buffer->out_offs;
+#ifdef __KERNEL__
+    printk(KERN_DEBUG "Circular buffer (oldest to newest):\n");
+#else
+    printf("Circular buffer (oldest to newest):\n");
+#endif
+
+    for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; ++i) {
+        if (NULL != buffer->entry[buffer_iterator].buffptr) {
+#ifdef __KERNEL__
+            printk(KERN_DEBUG "elem: %d, %s - size: %ld\n", i, 
+                buffer->entry[buffer_iterator].buffptr, 
+                buffer->entry[buffer_iterator].size);
+#else
+            printf("elem: %d, %s - size: %ld\n", i, 
+                   buffer->entry[buffer_iterator].buffptr, 
+                   buffer->entry[buffer_iterator].size);
+#endif
+        } else {
+#ifdef __KERNEL__            
+           printk(KERN_DEBUG "elem: %d, Empty", i); 
+#else
+           printf("elem: %d, Empty", i); 
+#endif
+        }
+        buffer_iterator = 
+            (buffer_iterator + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+    }
+}
 /**
 * Initializes the circular buffer described by @param buffer to an empty struct
 */
