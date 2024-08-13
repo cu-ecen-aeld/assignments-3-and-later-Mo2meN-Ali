@@ -67,10 +67,7 @@ extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 
-extern void aesd_circular_buffer_increment_buffer(struct aesd_circular_buffer *buffer);
-
-extern size_t aesd_circular_buffer_append_entry(struct aesd_circular_buffer *buffer, 
-                                         const struct aesd_buffer_entry *append_entry);
+extern char *aesd_circular_buffer_ref_buff(struct aesd_circular_buffer *buffer);
 
 /**
  * Create a for loop to iterate over each member of the circular buffer.

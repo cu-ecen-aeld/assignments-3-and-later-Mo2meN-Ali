@@ -75,7 +75,6 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
                     offset - buffer->entry[i % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED].size;
                 ++i;
             }
-            
         }
     }
     return NULL;
@@ -96,60 +95,24 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer,
     */
     buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
     buffer->entry[buffer->in_offs].size    = add_entry->size;    
-    aesd_circular_buffer_increment_buffer(buffer);
-}
-
-/**
-* Appends entry @param new_entry to the newest entry in @param buffer in the location specified in buffer->in_offs.
-* Any necessary locking must be handled by the caller
-* Any memory referenced in @param new_entry must be allocated by and/or must have a lifetime managed by the caller.
-*/
-size_t aesd_circular_buffer_append_entry(struct aesd_circular_buffer *buffer, 
-                                         const struct aesd_buffer_entry *append_entry)
-{
-    char *curr_entry = NULL;
-
-    curr_entry = (char *)buffer->entry[buffer->in_offs].buffptr;
-    buffer->entry[buffer->in_offs].buffptr = 
-        MALLOC(buffer->entry[buffer->in_offs].size + append_entry->size); // Re-alloc bigger size 
-    if (NULL == buffer->entry[buffer->in_offs].buffptr)  { // Mem allocation failed?
-        buffer->entry[buffer->in_offs].buffptr = curr_entry; // Do lose the old data
-        return FAIL;
-    } else {
-        memcpy((char *)buffer->entry[buffer->in_offs].buffptr, curr_entry, 
-            buffer->entry[buffer->in_offs].size);
-        memcpy((char *)buffer->entry[buffer->in_offs].buffptr + buffer->entry[buffer->in_offs].size,
-            append_entry->buffptr, append_entry->size);
-        buffer->entry[buffer->in_offs].size += append_entry->size;  // Update item size
-        FREE(curr_entry);   // release old enty before the append
-    }
-    return SUCCESS;
-}
-
-// /**
-//  * Returns the newest or oldest entry from @param buffer based on @param read_state
-//  */
-
-// struct aesd_buffer_entry *aesd_circular_buffer_read_entry(struct aesd_circular_buffer *buffer)
-// {
-
-// }
-
-/**
-* A helper function to increment the buffer, 
-*    can be used in conjuncation with \c aesd_circular_buffer_append_entry()
-* @param buffer is a pointner to the circular buffer
-*/
-void aesd_circular_buffer_increment_buffer(struct aesd_circular_buffer *buffer)
-{
     if (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED == (buffer->in_offs + 1)) {  // The next entry would be out-of-bounds?
         buffer->full     = true; // buffer is full
         buffer->in_offs  = 0;    // rewrite the oldest entry next time 
     } else { 
         ++buffer->in_offs;
     }
-    if (true == buffer->full) 
+    if (buffer->full) 
         buffer->out_offs = buffer->in_offs + 1;
+}
+
+/**
+ * Returns a pointer to the element being written next
+ * This function is being used to help free older buffptr entries 
+ *      when the circular buffer is full before assigning them to new pointers
+ */
+char *aesd_circular_buffer_ref_buff(struct aesd_circular_buffer *buffer)
+{
+    return (char *)buffer->entry[buffer->in_offs].buffptr;
 }
 
 /**
