@@ -66,13 +66,12 @@ extern struct aesd_buffer_entry
                                                  size_t char_offset, 
                                                  size_t *entry_offset_byte_rtn);
 
-extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry);
+extern void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, 
+                                           const struct aesd_buffer_entry *add_entry);
 
 extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 
 extern char *aesd_circular_buffer_ref_buff(struct aesd_circular_buffer *buffer);
-
-extern void aesd_circular_buffer_show(struct aesd_circular_buffer *buffer);
 
 extern struct aesd_buffer_entry *aesd_circular_buffer_read_entry(struct aesd_circular_buffer *buffer, 
                                                                  size_t offset_byte);

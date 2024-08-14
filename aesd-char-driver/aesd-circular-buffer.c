@@ -80,7 +80,7 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer,
     buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
     buffer->entry[buffer->in_offs].size    = add_entry->size; 
     if (buffer->full) 
-        buffer->out_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        buffer->out_offs = (buffer->out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     if (AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED == (buffer->in_offs + 1)) {  // The next entry would be out-of-bounds?
         buffer->full     = true; // buffer is full
         buffer->in_offs  = 0;    // rewrite the oldest entry next time 
@@ -115,42 +115,6 @@ struct aesd_buffer_entry *aesd_circular_buffer_read_entry(struct aesd_circular_b
                         buffer, offset_byte, &entry_offset_byte);
 }
 
-
-/** Print the content of the circular buffer @param buffer 
- * Any necessary locking must be handled by the caller
- * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
-*/
-void aesd_circular_buffer_show(struct aesd_circular_buffer *buffer)
-{
-    int i, buffer_iterator = buffer->out_offs;
-#ifdef __KERNEL__
-    printk(KERN_DEBUG "Circular buffer (oldest to newest):\n");
-#else
-    printf("Circular buffer (oldest to newest):\n");
-#endif
-
-    for (i = 0; i < AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED; ++i) {
-        if (NULL != buffer->entry[buffer_iterator].buffptr) {
-#ifdef __KERNEL__
-            printk(KERN_DEBUG "elem: %d, %s - size: %ld\n", i, 
-                buffer->entry[buffer_iterator].buffptr, 
-                buffer->entry[buffer_iterator].size);
-#else
-            printf("elem: %d, %s - size: %ld\n", i, 
-                   buffer->entry[buffer_iterator].buffptr, 
-                   buffer->entry[buffer_iterator].size);
-#endif
-        } else {
-#ifdef __KERNEL__            
-           printk(KERN_DEBUG "elem: %d, Empty", i); 
-#else
-           printf("elem: %d, Empty", i); 
-#endif
-        }
-        buffer_iterator = 
-            (buffer_iterator + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-    }
-}
 /**
 * Initializes the circular buffer described by @param buffer to an empty struct
 */
