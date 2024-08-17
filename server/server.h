@@ -104,15 +104,13 @@ public:
         }
         status = setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, 
                             &optval, sizeof(int));
-        if (-1 == status)
-        {
+        if (-1 == status) {
             perror("setsockopt():");
             return status;
         }
         status = setsockopt(socketfd, SOL_SOCKET, SO_REUSEPORT, 
                             &optval, sizeof(int));
-        if (-1 == status)
-        {
+        if (-1 == status) {
             perror("setsockopt():");
             return status;
         }
@@ -131,8 +129,8 @@ public:
 
     int newClientSocket(struct sockaddr *listenSockAddr, socklen_t *listenSockLen)
     {
-        int commSocket = -1; // The socket that is going to be used by send annd receive
-        // fcntl(socketfd, F_SETFL, O_NONBLOCK); 
+        int commSocket = -1; // The socket that is going to be used by send and receive
+        
         commSocket = accept(socketfd, listenSockAddr, listenSockLen);
         /* Debugging! */
         printf("Accept(), commSocket = %d\n", commSocket);

@@ -32,6 +32,7 @@ struct aesd_dev
      */
     struct aesd_circular_buffer *pbuffer;
     struct mutex lock;
+    loff_t buff_size;     // Size of the buffptr since that is what we are reading
     struct cdev cdev;     /* Char device structure      */
 };
 

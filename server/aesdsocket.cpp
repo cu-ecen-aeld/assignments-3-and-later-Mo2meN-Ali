@@ -7,6 +7,8 @@
 #include "queue.h"
 #include "timestamp.h"
 
+#define USE_AESD_CHAR_DEVICE (1U) // A build switch for assignment8
+
 constexpr unsigned int  SERVER_MSG_LEN = 100000;
 constexpr unsigned char BUFFER_LEN     = 100;
 constexpr unsigned char LF   = 0x0A;
@@ -39,25 +41,31 @@ static void signal_handler(int signalNo);
 int main(int argc, char *argv[])
 {
     int prog_status = EXIT_SUCCESS;
-    pthread_t portList[THREAD_MAX];
+    pthread_t thread_id_list[THREAD_MAX];
     unsigned char i   =  1;
     int listenPort    = -1;
     struct sigaction signalsAct;
     pthread_mutex_t fileMutex = PTHREAD_MUTEX_INITIALIZER;
-    // server defServer;
     server ipServer("9000");
     struct sockaddr ipSockAddr;
     socklen_t len = sizeof(ipSockAddr);
     FILE *pFile = NULL;
 
+#if (1 == USE_AESD_CHAR_DEVICE)
+    pFile = fopen("/dev/aesdchar", "r+");
+    if (NULL == pFile)  {
+        perror("fopen():");
+        exit(EXIT_FAILURE);
+    }
+#else 
     pFile = fopen("/var/tmp/aesdsocketdata.txt", "w+");
     if (NULL == pFile)  {
         perror("fopen():");
         exit(EXIT_FAILURE);
     }
+#endif   
 
     printf("ipServer socketfd: %d\n", ipServer.create(20));
-
     if (NULL != argv[1]) {
         if (0 == strcmp(argv[1], "-d")) {
             prog_status = daemon(0, 0);
@@ -80,15 +88,21 @@ int main(int argc, char *argv[])
         perror("sigaction(SIGTERM):");
         exit(EXIT_FAILURE);
     }
+/**
+ * In case of \c USE_AESD_CHAR_DEVICE==1 the \c thread_id_list[0] will be empty,
+ *  but that is fine since the array is already static and does not take extra space for it anyway.
+ */
+#if (0 == USE_AESD_CHAR_DEVICE)
     sigaction(SIGALRM, &signalsAct, NULL);
     if (0 != prog_status) {
         perror("sigaction(SIGALARM):");
         exit(EXIT_FAILURE);
     }
-    portList[0] = timestamp_thread_init(BUFFER_LEN, &fileMutex, pFile);
-    if (0 < portList[0]) {
-        printf("portlist[0] = %lu\n", portList[0]);
+    thread_id_list[0] = timestamp_thread_init(BUFFER_LEN, &fileMutex, pFile);
+    if (thread_id_list[0]) {
+        printf("thread_id_list[0] = %lu\n", thread_id_list[0]);
     }
+#endif
     while (1) {
         if (true  == sigTermFlag) {
             syslog(LOG_DEBUG, "Caught signal, exiting");
@@ -107,15 +121,19 @@ int main(int argc, char *argv[])
                 (i < (THREAD_MAX + 1))) {
                 ipServer.initServerThread(listenPort, server_thread, 
                                           SERVER_MSG_LEN, pFile, &fileMutex);
-                portList[i] = ipServer.getThreadId(i - 1);
-                printf("Created new thread %lu\n\n", portList[i]);
+                thread_id_list[i] = ipServer.getThreadId(i - 1);
+                printf("Created new thread %lu\n\n", thread_id_list[i]);
                 ++i;
                 syslog(LOG_DEBUG, "Accepted connection from %s", ipServer.getIpAddr());
             }
         }
     }
+#if (0 == USE_AESD_CHAR_DEVICE)
     for (int j = 0; j < i; ++j) {
-        prog_status = pthread_join(portList[j], NULL);
+#else // thread_id_list[0] is used for the timer thread which does not exist in this configuration
+    for (int j = 1; j < i; ++j) {
+#endif
+        prog_status = pthread_join(thread_id_list[j], NULL);
         if (0 != prog_status) {
             errno = prog_status;
             printf("Thread %d, ", i);
@@ -124,8 +142,9 @@ int main(int argc, char *argv[])
     }
     sigThreadTerminateFlag = false;
     fclose(pFile);
+#if (0 == USE_AESD_CHAR_DEVICE) // No deletion needed for a device driver
     system("rm /var/tmp/aesdsocketdata.txt");
-
+#endif
     return (prog_status);
 }
 
@@ -137,9 +156,11 @@ static void signal_handler(int signalNo)
     if (SIGINT == signalNo) {
         sigIntFlag = true;
     }
+#if (0 == USE_AESD_CHAR_DEVICE)
     if (SIGALRM == signalNo) {
         sigAlrmFlag = true;
     }
+#endif
 }
 
 void *server_thread(void *args)
@@ -165,8 +186,6 @@ void *server_thread(void *args)
         if (-1 == numOfBytes) {
             perror("recv():");
         }
-        // printf("pThreadArgs->msgLen = %d, numOfBytes received = %d\n\n",
-        //         pThreadArgs->msgLen, numOfBytes);
         if (0 != numOfBytes) {
             i = j = 0;
             while ((i < pThreadArgs->msgLen) &&
@@ -205,11 +224,11 @@ void *server_thread(void *args)
                     printf("Mutex locked, thread ID: %lu\n", pthread_self());
                 }
                 if (0 == mutexRes) {
-                    fseek(pThreadArgs->pFile, 0, SEEK_END);
-                    fwrite(fileBuffer, strlen(fileBuffer), 1, pThreadArgs->pFile);
+                    fseek(pThreadArgs->pFile, 0, SEEK_END); // Point to the end of the file
+                    fwrite(fileBuffer, strlen(fileBuffer), sizeof(char), pThreadArgs->pFile);
                     memset(fileBuffer, '\0', SERVER_MSG_LEN);
-                    rewind(pThreadArgs->pFile);
-                    fread(fileBuffer, SERVER_MSG_LEN, 1, pThreadArgs->pFile);
+                    fseek(pThreadArgs->pFile, 0, SEEK_SET); // Point to the beginning of the file
+                    fread(fileBuffer, SERVER_MSG_LEN, sizeof(char), pThreadArgs->pFile); 
                     mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
                     if (0 != mutexRes) {
                         puts("Mutex unlocking Error");
@@ -240,6 +259,7 @@ void *server_thread(void *args)
     return EXIT_SUCCESS;
 }
 
+#if (0 == USE_AESD_CHAR_DEVICE)
 pthread_t timestamp_thread_init(uint32_t strLen, 
                                 pthread_mutex_t *fileMutex, FILE *pFile)
 {
@@ -323,7 +343,6 @@ void *timestamp_thread(void *args)
             if (0 == mutexRes) {
                 fwrite(fileBuffer, strlen(fileBuffer), 1, pTimestamp_args->pFile);  // Log to the file
                 fflush(pTimestamp_args->pFile);
-                pthread_mutex_unlock(pTimestamp_args->fileMutex);
                 mutexRes = pthread_mutex_unlock(pTimestamp_args->fileMutex);
                 if (0 != mutexRes) {
                     puts("Mutex unlocking Error");
@@ -342,3 +361,4 @@ void *timestamp_thread(void *args)
     }
     return(EXIT_SUCCESS);     
 }
+#endif

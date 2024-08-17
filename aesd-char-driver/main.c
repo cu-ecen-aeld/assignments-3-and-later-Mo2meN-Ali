@@ -95,7 +95,7 @@ ssize_t aesd_read(struct file *filp, char __user *buff, size_t count,
     size_t read_offset_buffer_size = 0; 
     struct aesd_buffer_entry *entry = NULL;
 
-    PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
+    PDEBUG("********read %zu bytes with offset %lld",count,*f_pos);
     /**
      * TODO: handle read
      */
@@ -143,7 +143,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buff, size_t count,
     char *tmp_user_buffer = NULL; // This buffer reads from the user space
     static struct aesd_buffer_entry full_user_entry = { NULL, 0 }; // This buffer contains a full read buffer
 
-    PDEBUG("write %zu bytes with offset %lld", count, *f_pos);
+    PDEBUG("********write %zu bytes with offset %lld", count, *f_pos);
     /**
      * TODO: handle write
      */
@@ -168,7 +168,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buff, size_t count,
         kfree(tmp_user_buffer);
         goto out;
     }
-    aesd_buffer_print("\n\n***Received from the user", 
+    aesd_buffer_print("\nReceived from the user", 
         tmp_user_buffer + full_user_entry.size, count);
     PDEBUG("Last character from the user input is: %d, %c\n", 
             tmp_user_buffer[full_user_entry.size + count - 1], 
@@ -186,11 +186,12 @@ ssize_t aesd_write(struct file *filp, const char __user *buff, size_t count,
         aesd_buffer_print("Completed write command", 
             full_user_entry.buffptr, full_user_entry.size);
         aesd_circular_buffer_add_entry(dev->pbuffer, &full_user_entry); // Add the new item
+        dev->buff_size += full_user_entry.size; // update the buffer size
         // Reset the full_read_entry without free(), gets freed in the cleanup function
         full_user_entry.buffptr = NULL;
         full_user_entry.size    = 0;
     }
-    *f_pos = count; // We write all user bytes every call so no need to increment, just assign.
+    *f_pos += count;
     retval = count; // Number of bytes written during this call.
 
 
@@ -198,12 +199,41 @@ out:
     mutex_unlock(&dev->lock);
     return retval;
 }
+
+loff_t aesd_lseek (struct file *pfile, loff_t off, int whence)
+{
+    struct aesd_dev *dev = pfile->private_data;
+    loff_t new_fpos = -1;
+
+    switch (whence) {
+        case 0:  // SEEK_SET
+            new_fpos = off;
+            break;
+        
+        case 1:  // SEEK_CUR
+             new_fpos = pfile->f_pos + off;
+            break;
+        
+        case 2:  // SEEK_END
+            new_fpos = dev->buff_size;
+            break;
+        
+        default:
+            return -EINVAL;
+    }
+    if (0 > new_fpos) 
+        return -EINVAL;
+    pfile->f_pos = new_fpos;
+    return new_fpos;
+}
+
 struct file_operations aesd_fops = {
-    .owner =    THIS_MODULE,
-    .read =     aesd_read,
-    .write =    aesd_write,
-    .open =     aesd_open,
-    .release =  aesd_release,
+    .owner   = THIS_MODULE,
+    .read    = aesd_read,
+    .write   = aesd_write,
+    .open    = aesd_open,
+    .release = aesd_release,
+    .llseek  = aesd_lseek
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
