@@ -40,7 +40,6 @@ public:
         unsigned int msgLen;  // Size of the buffer
         char *msg;            // The buffer to hold messages
         pthread_t threadId;
-        FILE *pFile;
         pthread_mutex_t *fileMutex;
     };
 
@@ -168,7 +167,7 @@ public:
     }
 
     pthread_t initServerThread(int commSocket, void *server_thread(void *threadArgs), 
-                               int msgLen, FILE *userFile, pthread_mutex_t *fileMutex) // Returns the threadID in case of success, -1 otherwise.
+                               int msgLen, pthread_mutex_t *fileMutex) // Returns the threadID in case of success, -1 otherwise.
     {
         int status = -1;
         pthread_t threadID = -1;
@@ -190,7 +189,6 @@ public:
         } else {    // If malloc failed.
             return status;
         }
-        pThreadArgs[numOfThreads]->pFile = userFile;
         status = pthread_create(&pThreadArgs[numOfThreads]->threadId, NULL, 
                                 server_thread, 
                                 static_cast<void *>(pThreadArgs[numOfThreads]));

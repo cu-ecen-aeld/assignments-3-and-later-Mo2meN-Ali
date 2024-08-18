@@ -14,7 +14,6 @@ struct timestamp_args {
     unsigned char timestamp_len; // Length of the timestamp string
     pthread_mutex_t *fileMutex;  // A pointer to the file mutex 
     pthread_t threadID;         
-    FILE *pFile;                 // Pointer to the file to log the timestamp
 };
 } /* extern "C" */
 #endif /* __cplusplus */

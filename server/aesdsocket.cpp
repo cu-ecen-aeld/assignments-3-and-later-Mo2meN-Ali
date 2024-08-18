@@ -23,8 +23,7 @@ int sigThreadTerminateFlag = false;
 
 void *server_thread(void *args);
 // Return the thread id in case of success and null otherwise.
-pthread_t timestamp_thread_init(uint32_t strLen, 
-                                pthread_mutex_t *fileMutex, FILE *pFile);
+pthread_t timestamp_thread_init(uint32_t strLen, pthread_mutex_t *fileMutex);
 void *timestamp_thread(void *args);
 static void signal_handler(int signalNo);
 
@@ -49,21 +48,6 @@ int main(int argc, char *argv[])
     server ipServer("9000");
     struct sockaddr ipSockAddr;
     socklen_t len = sizeof(ipSockAddr);
-    FILE *pFile = NULL;
-
-#if (1 == USE_AESD_CHAR_DEVICE)
-    pFile = fopen("/dev/aesdchar", "r+");
-    if (NULL == pFile)  {
-        perror("fopen():");
-        exit(EXIT_FAILURE);
-    }
-#else 
-    pFile = fopen("/var/tmp/aesdsocketdata.txt", "w+");
-    if (NULL == pFile)  {
-        perror("fopen():");
-        exit(EXIT_FAILURE);
-    }
-#endif   
 
     printf("ipServer socketfd: %d\n", ipServer.create(20));
     if (NULL != argv[1]) {
@@ -98,7 +82,7 @@ int main(int argc, char *argv[])
         perror("sigaction(SIGALARM):");
         exit(EXIT_FAILURE);
     }
-    thread_id_list[0] = timestamp_thread_init(BUFFER_LEN, &fileMutex, pFile);
+    thread_id_list[0] = timestamp_thread_init(BUFFER_LEN, &fileMutex);
     if (thread_id_list[0]) {
         printf("thread_id_list[0] = %lu\n", thread_id_list[0]);
     }
@@ -120,7 +104,7 @@ int main(int argc, char *argv[])
             if ((listenPort > 0) &&
                 (i < (THREAD_MAX + 1))) {
                 ipServer.initServerThread(listenPort, server_thread, 
-                                          SERVER_MSG_LEN, pFile, &fileMutex);
+                                          SERVER_MSG_LEN, &fileMutex);
                 thread_id_list[i] = ipServer.getThreadId(i - 1);
                 printf("Created new thread %lu\n\n", thread_id_list[i]);
                 ++i;
@@ -141,7 +125,6 @@ int main(int argc, char *argv[])
         }
     }
     sigThreadTerminateFlag = false;
-    fclose(pFile);
 #if (0 == USE_AESD_CHAR_DEVICE) // No deletion needed for a device driver
     system("rm /var/tmp/aesdsocketdata.txt");
 #endif
@@ -173,6 +156,7 @@ void *server_thread(void *args)
     int mutexRes = -1;
     struct server::thread_args *pThreadArgs =
         static_cast<struct server::thread_args *>(args);
+    FILE *pFile = NULL;
 
     memset(pThreadArgs->msg, 0, pThreadArgs->msgLen);
     memset(fileBuffer, 0, SERVER_MSG_LEN);
@@ -190,65 +174,80 @@ void *server_thread(void *args)
             i = j = 0;
             while ((i < pThreadArgs->msgLen) &&
                    ('\0' != pThreadArgs->msg[i])) {
-                while ((LF != pThreadArgs->msg[i])   &&
-                       (CR != pThreadArgs->msg[i])   &&
-                       (CRLF != pThreadArgs->msg[i]) &&
-                       ('\0' != pThreadArgs->msg[i])) {
+                if ((LF != pThreadArgs->msg[i])   &&
+                    (CR != pThreadArgs->msg[i])   &&
+                    (CRLF != pThreadArgs->msg[i]) &&
+                    ('\0' != pThreadArgs->msg[i])) {
                     fileBuffer[j++] = pThreadArgs->msg[i++];
-                }
-                if (LF == pThreadArgs->msg[i]) {
-                    fileBuffer[j] = LF;
-                } else if ((CR == pThreadArgs->msg[i++]) && 
-                           (LF == pThreadArgs->msg[i])) {
-                    fileBuffer[j++] = CR;
-                    fileBuffer[j] = LF;
-                } else if (CR  == pThreadArgs->msg[i]) {
-                    fileBuffer[j] = CR;
-                } else if (CRLF == pThreadArgs->msg[i]) {
-                    fileBuffer[j] = CRLF;
                 } else {
-                    fileBuffer[j] = LF;
+                    break;
                 }
-                j = 0;
-                ++i;
-                mutexRes = pthread_mutex_lock(pThreadArgs->fileMutex);
+            }
+            if (LF == pThreadArgs->msg[i]) {
+                fileBuffer[j] = LF;
+            } else if ((CR == pThreadArgs->msg[i++]) && 
+                        (LF == pThreadArgs->msg[i])) {
+                fileBuffer[j++] = CR;
+                fileBuffer[j] = LF;
+            } else if (CR  == pThreadArgs->msg[i]) {
+                fileBuffer[j] = CR;
+            } else if (CRLF == pThreadArgs->msg[i]) {
+                fileBuffer[j] = CRLF;
+            } else {
+                fileBuffer[j] = LF;
+            }
+            mutexRes = pthread_mutex_lock(pThreadArgs->fileMutex);
+            if (0 != mutexRes) {
+                puts("Mutex locking Error");
+                do {
+                    usleep(10000);
+                    printf("lock not ready, thread ID: %lu\n", 
+                        pthread_self());
+                    mutexRes = pthread_mutex_lock(pThreadArgs->fileMutex);
+                } while((0 != mutexRes) && (k++ < noOfRetries));
+            } else {
+                printf("Mutex locked, thread ID: %lu\n", pthread_self());
+            }
+            if (0 == mutexRes) {
+                k = 0;  // restart the retries counter;
+#if (1 == USE_AESD_CHAR_DEVICE)
+                pFile = fopen("/dev/aesdchar", "r+");
+                if (NULL == pFile)  {
+                    perror("fopen():");
+                    exit(EXIT_FAILURE);
+                }
+#else 
+                pFile = fopen("/var/tmp/aesdsocketdata.txt", "a+");
+                if (NULL == pFile)  {
+                    perror("fopen():");
+                    exit(EXIT_FAILURE);
+                }
+#endif  
+                fseek(pFile, 0, SEEK_END); // Point to the end of the file
+                fwrite(fileBuffer, strlen(fileBuffer), sizeof(char), pFile);
+                memset(fileBuffer, '\0', SERVER_MSG_LEN);
+                fseek(pFile, 0, SEEK_SET); // Point to the beginning of the file
+                fread(fileBuffer, SERVER_MSG_LEN, sizeof(char), pFile); 
+                fclose(pFile);
+                mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
                 if (0 != mutexRes) {
-                    puts("Mutex locking Error");
+                    puts("Mutex unlocking Error");
                     do {
                         usleep(10000);
-                        printf("lock not ready, thread ID: %lu\n", 
+                        printf("unlock not ready, thread ID: %lu\n", 
                             pthread_self());
-                        mutexRes = pthread_mutex_lock(pThreadArgs->fileMutex);
+                        mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
                     } while((0 != mutexRes) && (k++ < noOfRetries));
                 } else {
-                    printf("Mutex locked, thread ID: %lu\n", pthread_self());
+                    printf("Mutex unlocked, thread ID: %lu\n", pthread_self());
                 }
-                if (0 == mutexRes) {
-                    fseek(pThreadArgs->pFile, 0, SEEK_END); // Point to the end of the file
-                    fwrite(fileBuffer, strlen(fileBuffer), sizeof(char), pThreadArgs->pFile);
-                    memset(fileBuffer, '\0', SERVER_MSG_LEN);
-                    fseek(pThreadArgs->pFile, 0, SEEK_SET); // Point to the beginning of the file
-                    fread(fileBuffer, SERVER_MSG_LEN, sizeof(char), pThreadArgs->pFile); 
-                    mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
-                    if (0 != mutexRes) {
-                        puts("Mutex unlocking Error");
-                        do {
-                            usleep(10000);
-                            printf("unlock not ready, thread ID: %lu\n", 
-                                pthread_self());
-                            mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
-                        } while((0 != mutexRes) && (k++ < noOfRetries));
-                    } else {
-                        printf("Mutex unlocked, thread ID: %lu\n", pthread_self());
-                    }
-                }
-                numOfBytes = send(pThreadArgs->socketfd, fileBuffer,
-                                strlen(fileBuffer), 0);
-                if (-1 == numOfBytes) {
-                    perror("send():");
-                }
-                memset(fileBuffer, '\0', SERVER_MSG_LEN);
             }
+            numOfBytes = send(pThreadArgs->socketfd, fileBuffer,
+                            strlen(fileBuffer), 0);
+            if (-1 == numOfBytes) {
+                perror("send():");
+            }
+            memset(fileBuffer, '\0', SERVER_MSG_LEN);
         }
         memset(pThreadArgs->msg, 0, pThreadArgs->msgLen);
         usleep(500000); // sleep for 0.5 second
@@ -261,7 +260,7 @@ void *server_thread(void *args)
 
 #if (0 == USE_AESD_CHAR_DEVICE)
 pthread_t timestamp_thread_init(uint32_t strLen, 
-                                pthread_mutex_t *fileMutex, FILE *pFile)
+                                pthread_mutex_t *fileMutex)
 {
     struct itimerval itv;
 // Init args data structure
@@ -270,7 +269,6 @@ pthread_t timestamp_thread_init(uint32_t strLen,
     pTimestamp_args->sTimeStamp_RFC2822 = 
         static_cast<char *>(malloc(strLen * sizeof(char)));     
     pTimestamp_args->fileMutex = fileMutex;
-    pTimestamp_args->pFile     = pFile;
     pTimestamp_args->timestamp_len = strLen;
 // Create the actual thread
     pthread_create(&(pTimestamp_args->threadID), NULL, 
@@ -299,6 +297,7 @@ void *timestamp_thread(void *args)
     time_t t;
     struct tm *timestamp;
     int mutexRes = -1;
+    FILE *pFile = NULL;
 
     while (1) {
         if (true == sigThreadTerminateFlag) {
@@ -341,8 +340,15 @@ void *timestamp_thread(void *args)
                 printf("Mutex locked, thread ID: %lu\n", pthread_self());
             }
             if (0 == mutexRes) {
-                fwrite(fileBuffer, strlen(fileBuffer), 1, pTimestamp_args->pFile);  // Log to the file
-                fflush(pTimestamp_args->pFile);
+                k = 0;  // restart the retries counter;
+                pFile = fopen("/var/tmp/aesdsocketdata.txt", "a+");
+                if (NULL == pFile)  {
+                    perror("fopen():");
+                    exit(EXIT_FAILURE);
+                }
+                fwrite(fileBuffer, strlen(fileBuffer), 1, pFile);  // Log to the file
+                fflush(pFile);
+                fclose(pFile);
                 mutexRes = pthread_mutex_unlock(pTimestamp_args->fileMutex);
                 if (0 != mutexRes) {
                     puts("Mutex unlocking Error");
