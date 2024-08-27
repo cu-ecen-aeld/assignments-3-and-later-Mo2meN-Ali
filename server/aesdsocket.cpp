@@ -6,8 +6,9 @@
 #include "server.h"
 #include "queue.h"
 #include "timestamp.h"
+#include "../aesd-char-driver/aesd_ioctl.h"
 
-#define USE_AESD_CHAR_DEVICE (1U) // A build switch for assignment8
+#define USE_AESD_CHAR_DEVICE (1U) // A build switch for the 'aesdchar' device driver
 
 constexpr unsigned int  SERVER_MSG_LEN = 100000;
 constexpr unsigned char BUFFER_LEN     = 100;
@@ -21,11 +22,22 @@ int sigIntFlag  = false;
 int sigAlrmFlag = false;
 int sigThreadTerminateFlag = false;
 
+#if (1 == USE_AESD_CHAR_DEVICE)
+    const char *ioc_seekto_str = "AESDCHAR_IOCSEEKTO:"; 
+#endif
+
 void *server_thread(void *args);
 // Return the thread id in case of success and null otherwise.
 pthread_t timestamp_thread_init(uint32_t strLen, pthread_mutex_t *fileMutex);
 void *timestamp_thread(void *args);
 static void signal_handler(int signalNo);
+#if (1 == USE_AESD_CHAR_DEVICE)
+    /** Extracts X, Y from the AESDChAR_IOCSEEKTO:X,Y command
+     * @returns -1 on failure, 0 on sucess
+    */
+    int extract_ioctl_xy(char *str, uint32_t *x, uint32_t *y);
+#endif
+
 
 /*
  * struct sigaction {
@@ -103,7 +115,7 @@ int main(int argc, char *argv[])
             listenPort  = ipServer.newClientSocket(&ipSockAddr, &len);
             if ((listenPort > 0) &&
                 (i < (THREAD_MAX + 1))) {
-                ipServer.initServerThread(listenPort, server_thread, 
+                ipServer.initServerThread(listenPort, server_thread,
                                           SERVER_MSG_LEN, &fileMutex);
                 thread_id_list[i] = ipServer.getThreadId(i - 1);
                 printf("Created new thread %lu\n\n", thread_id_list[i]);
@@ -146,10 +158,33 @@ static void signal_handler(int signalNo)
 #endif
 }
 
+int extract_ioctl_xy(char *str, uint32_t *x, uint32_t *y)
+{
+    size_t i;
+    char tmp[6] = {'\0'};
+
+// Check the str starts with ioc_seekto_str and not just includes it
+    for (i = 0; i < strlen(ioc_seekto_str); ++i) 
+        if (str[i] != ioc_seekto_str[i])  
+            return -1;
+    
+    *x = strtoul(str + i, NULL, 10);
+// Here we check that the user didn't overflow the X argument 
+    sprintf(tmp, "%d", *x);
+    printf("tmp = %s, strlen(tmp) = %ld\n", tmp, strlen(tmp));
+    if (strlen(tmp) >= 6) // X can't be 6-digits number
+        return -1;
+
+    *y = strtoul(str + i + strlen(tmp) + 1, NULL, 10); // AESDCHAR_IOCSEEKTO: + X + ','
+    printf("str = %s, ioc_seekto_str = %s, x = %d, y = %d\n", 
+        str, ioc_seekto_str, *x, *y);
+    return 0;
+}
+
 void *server_thread(void *args)
 {
     int numOfBytes = 0;
-    char *fileBuffer = 
+    char *fileBuffer =
         static_cast<char *>(malloc(sizeof(char) * SERVER_MSG_LEN));
     unsigned int i, j;
     unsigned char k = 0, noOfRetries = 10;
@@ -157,6 +192,11 @@ void *server_thread(void *args)
     struct server::thread_args *pThreadArgs =
         static_cast<struct server::thread_args *>(args);
     FILE *pFile = NULL;
+
+#if (USE_AESD_CHAR_DEVICE == 1)
+    uint32_t write_cmd, write_cmd_offset;
+    write_cmd = write_cmd_offset = 0;
+#endif
 
     memset(pThreadArgs->msg, 0, pThreadArgs->msgLen);
     memset(fileBuffer, 0, SERVER_MSG_LEN);
@@ -185,7 +225,7 @@ void *server_thread(void *args)
             }
             if (LF == pThreadArgs->msg[i]) {
                 fileBuffer[j] = LF;
-            } else if ((CR == pThreadArgs->msg[i++]) && 
+            } else if ((CR == pThreadArgs->msg[i++]) &&
                         (LF == pThreadArgs->msg[i])) {
                 fileBuffer[j++] = CR;
                 fileBuffer[j] = LF;
@@ -201,7 +241,7 @@ void *server_thread(void *args)
                 puts("Mutex locking Error");
                 do {
                     usleep(10000);
-                    printf("lock not ready, thread ID: %lu\n", 
+                    printf("lock not ready, thread ID: %lu\n",
                         pthread_self());
                     mutexRes = pthread_mutex_lock(pThreadArgs->fileMutex);
                 } while((0 != mutexRes) && (k++ < noOfRetries));
@@ -216,25 +256,39 @@ void *server_thread(void *args)
                     perror("fopen():");
                     exit(EXIT_FAILURE);
                 }
-#else 
+                // Check if it is ioctl command
+                if (0 == extract_ioctl_xy(fileBuffer, &write_cmd, &write_cmd_offset)) {
+                    syslog(LOG_DEBUG, "IOCTL");
+                    struct aesd_seekto seekto = {write_cmd, write_cmd_offset};
+                    printf("ioctl: %d\n", ioctl(fileno(pFile), AESDCHAR_IOCSEEKTO, &seekto));
+                    
+                } else { // If not; just read and write normally
+                    fseek(pFile, 0, SEEK_END); // Point to the end of the file
+                    fwrite(fileBuffer, strlen(fileBuffer), sizeof(char), pFile);
+                    fseek(pFile, 0, SEEK_SET); // Point to the beginning of the file
+                }
+                memset(fileBuffer, '\0', SERVER_MSG_LEN);
+                fread(fileBuffer, SERVER_MSG_LEN, sizeof(char), pFile);
+                fclose(pFile);
+#else
                 pFile = fopen("/var/tmp/aesdsocketdata.txt", "a+");
                 if (NULL == pFile)  {
                     perror("fopen():");
                     exit(EXIT_FAILURE);
                 }
-#endif  
                 fseek(pFile, 0, SEEK_END); // Point to the end of the file
                 fwrite(fileBuffer, strlen(fileBuffer), sizeof(char), pFile);
                 memset(fileBuffer, '\0', SERVER_MSG_LEN);
                 fseek(pFile, 0, SEEK_SET); // Point to the beginning of the file
-                fread(fileBuffer, SERVER_MSG_LEN, sizeof(char), pFile); 
+                fread(fileBuffer, SERVER_MSG_LEN, sizeof(char), pFile);
                 fclose(pFile);
+#endif
                 mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
                 if (0 != mutexRes) {
                     puts("Mutex unlocking Error");
                     do {
                         usleep(10000);
-                        printf("unlock not ready, thread ID: %lu\n", 
+                        printf("unlock not ready, thread ID: %lu\n",
                             pthread_self());
                         mutexRes = pthread_mutex_unlock(pThreadArgs->fileMutex);
                     } while((0 != mutexRes) && (k++ < noOfRetries));
@@ -259,19 +313,19 @@ void *server_thread(void *args)
 }
 
 #if (0 == USE_AESD_CHAR_DEVICE)
-pthread_t timestamp_thread_init(uint32_t strLen, 
+pthread_t timestamp_thread_init(uint32_t strLen,
                                 pthread_mutex_t *fileMutex)
 {
     struct itimerval itv;
 // Init args data structure
-    struct timestamp_args *pTimestamp_args = 
+    struct timestamp_args *pTimestamp_args =
         static_cast<struct timestamp_args *>(malloc(sizeof(struct timestamp_args)));
-    pTimestamp_args->sTimeStamp_RFC2822 = 
-        static_cast<char *>(malloc(strLen * sizeof(char)));     
+    pTimestamp_args->sTimeStamp_RFC2822 =
+        static_cast<char *>(malloc(strLen * sizeof(char)));
     pTimestamp_args->fileMutex = fileMutex;
     pTimestamp_args->timestamp_len = strLen;
 // Create the actual thread
-    pthread_create(&(pTimestamp_args->threadID), NULL, 
+    pthread_create(&(pTimestamp_args->threadID), NULL,
                    timestamp_thread, static_cast<void *>(pTimestamp_args));
 // Init timer
     itv.it_value.tv_sec     = 0;
@@ -285,11 +339,11 @@ pthread_t timestamp_thread_init(uint32_t strLen,
 
 void *timestamp_thread(void *args)
 {
-    struct timestamp_args *pTimestamp_args = 
+    struct timestamp_args *pTimestamp_args =
         static_cast<struct timestamp_args *>(args);
-    uint16_t fileBufferSize = 
+    uint16_t fileBufferSize =
         strlen("timestamp:") + (BUFFER_LEN * sizeof(char));
-    char *fileBuffer = 
+    char *fileBuffer =
         static_cast<char *>(malloc(fileBufferSize));
     pTimestamp_args->sTimeStamp_RFC2822[0] = {'\0'};
     fileBuffer[0] = {'\0'};
@@ -318,13 +372,13 @@ void *timestamp_thread(void *args)
                 free(pTimestamp_args);
                 pthread_exit(NULL);
             }
-            strftime(pTimestamp_args->sTimeStamp_RFC2822, 
+            strftime(pTimestamp_args->sTimeStamp_RFC2822,
                     pTimestamp_args->timestamp_len, "%a, %d %b %Y %T %z", timestamp);
             memset(fileBuffer, 0, fileBufferSize);
             strcat(fileBuffer, "timestamp:");
             strcat(fileBuffer, pTimestamp_args->sTimeStamp_RFC2822);
             strcat(fileBuffer, "\n");
-            printf("pTimestamp_args->sTimeStamp_RFC2822: %s\n", 
+            printf("pTimestamp_args->sTimeStamp_RFC2822: %s\n",
                 pTimestamp_args->sTimeStamp_RFC2822);
             printf("fileBuffer: %s\n", fileBuffer);
             mutexRes = pthread_mutex_lock(pTimestamp_args->fileMutex);
@@ -332,7 +386,7 @@ void *timestamp_thread(void *args)
                 puts("Mutex locking Error");
                 do {
                     usleep(10000);
-                    printf("lock not ready, thread ID: %lu\n", 
+                    printf("lock not ready, thread ID: %lu\n",
                         pthread_self());
                     mutexRes = pthread_mutex_lock(pTimestamp_args->fileMutex);
                 } while((0 != mutexRes) && (k++ < noOfRetries));
@@ -354,17 +408,17 @@ void *timestamp_thread(void *args)
                     puts("Mutex unlocking Error");
                     do {
                         usleep(10000);
-                        printf("unlock not ready, thread ID: %lu\n", 
+                        printf("unlock not ready, thread ID: %lu\n",
                             pthread_self());
                         mutexRes = pthread_mutex_unlock(pTimestamp_args->fileMutex);
                     } while((0 != mutexRes) && (k++ < noOfRetries));
                 } else {
                     printf("Mutex unlocked, thread ID: %lu\n", pthread_self());
                 }
-            }      
+            }
         }
         sleep(5);
     }
-    return(EXIT_SUCCESS);     
+    return(EXIT_SUCCESS);
 }
 #endif

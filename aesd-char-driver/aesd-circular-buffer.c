@@ -39,7 +39,7 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
     unsigned int entry_counter   = buffer->out_offs;
     unsigned int total_char_size = 0;
     unsigned int prev_char_size  = 0;
-    *entry_offset_byte_rtn = -1;
+    *entry_offset_byte_rtn       = -1;
     
     if (NULL == buffer) {
         return NULL;
